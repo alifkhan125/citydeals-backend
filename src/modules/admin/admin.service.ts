@@ -1,4 +1,4 @@
-import { Injectable, ConflictException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, ConflictException, NotFoundException } from '@nestjs/common';
 import bcrypt from 'bcrypt';
 import { PrismaService } from '../../database/prisma.service.js';
 import { MailService } from '../mail/mail.service.js';
@@ -23,10 +23,125 @@ export class AdminService {
         phoneNumber: true,
         status: true,
         createdAt: true,
+        latitude: true,
+        longitude: true,
+        area: {
+          select: {
+            id: true,
+            name: true,
+            city: true,
+            state: true,
+          },
+        },
         _count: { select: { savedCoupons: true, couponRedemptions: true } },
       },
       orderBy: { createdAt: 'desc' },
     });
+  }
+
+  private mapGeocodeResult(item: {
+    lat?: string;
+    lon?: string;
+    display_name?: string;
+    name?: string;
+    namedetails?: Record<string, string | undefined>;
+    address?: Record<string, string | undefined>;
+  }, fallback: string) {
+    const address = item.address ?? {};
+    const englishName = item.namedetails?.['name:en'] || item.namedetails?.name;
+    return {
+      latitude: Number(item.lat),
+      longitude: Number(item.lon),
+      label: item.display_name || fallback,
+      name: englishName || item.name || address.suburb || address.neighbourhood || address.city || address.town || address.village || fallback,
+      city: address.city || address.town || address.village || address.county || '',
+      state: address.state || address.region || '',
+      country: address.country || '',
+      provider: 'OpenStreetMap Nominatim',
+    };
+  }
+
+  async geocode(query: string) {
+    const q = query?.trim();
+    if (!q) {
+      throw new BadRequestException('Search address is required');
+    }
+
+    const url = new URL('https://nominatim.openstreetmap.org/search');
+    url.searchParams.set('q', q);
+    url.searchParams.set('format', 'jsonv2');
+    url.searchParams.set('limit', '1');
+    url.searchParams.set('addressdetails', '1');
+    url.searchParams.set('namedetails', '1');
+    url.searchParams.set('accept-language', 'en');
+
+    const response = await fetch(url, {
+      headers: {
+        'Accept': 'application/json',
+        'Accept-Language': 'en',
+        'User-Agent': 'CityDealsDashboard/1.0 (admin geocoding)',
+      },
+    });
+
+    if (!response.ok) {
+      throw new BadRequestException('Could not search this address right now');
+    }
+
+    const results = (await response.json()) as Array<{
+      lat?: string;
+      lon?: string;
+      display_name?: string;
+      name?: string;
+      namedetails?: Record<string, string | undefined>;
+      address?: Record<string, string | undefined>;
+    }>;
+    const first = results[0];
+
+    if (!first?.lat || !first?.lon) {
+      throw new NotFoundException('No coordinates found for this address');
+    }
+
+    return this.mapGeocodeResult(first, q);
+  }
+
+  async geocodeSuggestions(query: string) {
+    const q = query?.trim();
+    if (!q) {
+      throw new BadRequestException('Search address is required');
+    }
+
+    const url = new URL('https://nominatim.openstreetmap.org/search');
+    url.searchParams.set('q', q);
+    url.searchParams.set('format', 'jsonv2');
+    url.searchParams.set('limit', '5');
+    url.searchParams.set('addressdetails', '1');
+    url.searchParams.set('namedetails', '1');
+    url.searchParams.set('accept-language', 'en');
+
+    const response = await fetch(url, {
+      headers: {
+        'Accept': 'application/json',
+        'Accept-Language': 'en',
+        'User-Agent': 'CityDealsDashboard/1.0 (admin geocoding)',
+      },
+    });
+
+    if (!response.ok) {
+      throw new BadRequestException('Could not search this address right now');
+    }
+
+    const results = (await response.json()) as Array<{
+      lat?: string;
+      lon?: string;
+      display_name?: string;
+      name?: string;
+      namedetails?: Record<string, string | undefined>;
+      address?: Record<string, string | undefined>;
+    }>;
+
+    return results
+      .filter((item) => item.lat && item.lon)
+      .map((item) => this.mapGeocodeResult(item, q));
   }
 
   user(id: string) {

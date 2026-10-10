@@ -45,7 +45,7 @@ export class NotificationsProcessor extends WorkerHost {
         userId,
         title: job.data.title,
         body: job.data.body,
-        data: { merchantId },
+        data: { sourceType: 'MERCHANT', merchantId },
       },
     });
     const token = user.fcmToken ?? '';
@@ -55,7 +55,7 @@ export class NotificationsProcessor extends WorkerHost {
             to: token,
             title: job.data.title,
             body: job.data.body,
-            data: { merchantId },
+            data: { sourceType: 'MERCHANT', merchantId },
             channelId: 'deals',
           },
         ])
@@ -64,7 +64,7 @@ export class NotificationsProcessor extends WorkerHost {
             token,
             title: job.data.title,
             body: job.data.body,
-            data: { merchantId },
+            data: { sourceType: 'MERCHANT', merchantId },
           },
         ]);
     return { sent: true, push };
@@ -112,7 +112,7 @@ export class NotificationsProcessor extends WorkerHost {
         userId,
         title,
         body,
-        data: { grouped: 'true', merchantIds: validMerchantIds },
+        data: { sourceType: 'NEARBY_DEALS', grouped: 'true', merchantIds: validMerchantIds },
       },
     });
 
@@ -121,10 +121,10 @@ export class NotificationsProcessor extends WorkerHost {
 
     const push = token.startsWith('ExpoPushToken[') || token.startsWith('ExponentPushToken[')
       ? await sendExpoPushMessages([
-          { to: token, title, body, data: { grouped: true }, channelId: 'deals' },
+          { to: token, title, body, data: { sourceType: 'NEARBY_DEALS', grouped: true }, channelId: 'deals' },
         ])
       : await sendFirebasePushMessages([
-          { token, title, body, data: { grouped: true } },
+          { token, title, body, data: { sourceType: 'NEARBY_DEALS', grouped: true } },
         ]);
         
     return { sent: true, push };

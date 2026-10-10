@@ -39,6 +39,18 @@ export class AdminController {
     return this.admin.search(user, q);
   }
 
+  @Get('geocode/suggestions')
+  @Roles('ADMIN', 'ADVERTISER')
+  geocodeSuggestions(@Query('q') q: string) {
+    return this.admin.geocodeSuggestions(q);
+  }
+
+  @Get('geocode')
+  @Roles('ADMIN', 'ADVERTISER')
+  geocode(@Query('q') q: string) {
+    return this.admin.geocode(q);
+  }
+
   // ─── Analytics (view-only — no specific permission needed) ───────────────
   @Get('redemptions')
   @Roles('ADMIN', 'ADVERTISER')

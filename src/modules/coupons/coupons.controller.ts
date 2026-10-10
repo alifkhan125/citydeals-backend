@@ -75,6 +75,13 @@ export class CouponsController {
 
   @UseGuards(OptionalJwtAuthGuard)
   @ApiBearerAuth('access-token')
+  @Post(':id/view')
+  trackView(@Param('id') id: string, @GetUser() user?: { id?: string }, @Body('source') source?: string) {
+    return this.couponsService.trackView(id, user?.id, source || 'APP');
+  }
+
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth('access-token')
   @Get(':id')
   findById(@Param('id') id: string, @GetUser() user?: { id?: string }) {
     return this.couponsService.findById(id, user?.id);
@@ -96,5 +103,14 @@ export class CouponsController {
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.couponsService.remove(id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, StaffPermissionGuard)
+  @ApiBearerAuth('access-token')
+  @Roles('ADMIN', 'ADVERTISER')
+  @RequirePermission('create-edit-coupons')
+  @Post(':id/notify-nearby')
+  notifyNearby(@Param('id') id: string) {
+    return this.couponsService.notifyNearbyUsers(id);
   }
 }

@@ -168,6 +168,7 @@ model Coupon {
   savedBy  SavedCoupon[]
   redemptions CouponRedemption[]
   shareEvents CouponShareEvent[]
+  viewEvents CouponViewEvent[]
 
   @@index([areaId, status])
   @@index([categoryId])
@@ -284,5 +285,20 @@ model CouponShareEvent {
   @@index([couponId])
   @@index([channel])
   @@index([eventType])
+  @@index([createdAt])
+}
+
+model CouponViewEvent {
+  id        String   @id @default(uuid())
+  couponId  String
+  userId    String?
+  source    String   @default("APP")
+  createdAt DateTime @default(now())
+
+  coupon Coupon @relation(fields: [couponId], references: [id])
+
+  @@index([couponId])
+  @@index([userId])
+  @@index([source])
   @@index([createdAt])
 }

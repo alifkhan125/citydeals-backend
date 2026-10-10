@@ -6,9 +6,14 @@ import { FilterCouponDto } from './dto/filter-coupon.dto.js';
 import { UpdateCouponDto } from './dto/update-coupon.dto.js';
 import { haversineDistanceMeters } from '../../common/utils/geo.util.js';
 
+import { NotificationsService } from '../notifications/notifications.service.js';
+
 @Injectable()
 export class CouponsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {}
 
   async create(user: { role: string; areaId?: string | null }, dto: CreateCouponDto) {
     const merchant = await this.prisma.merchant.findUnique({ where: { id: dto.merchantId } });
@@ -103,6 +108,13 @@ export class CouponsService {
         },
         area: true,
         category: true,
+        _count: {
+          select: {
+            savedBy: true,
+            redemptions: true,
+            viewEvents: true,
+          },
+        },
       },
       orderBy: [{ isWhitelisted: 'desc' }, { createdAt: 'desc' }],
     });
@@ -117,6 +129,13 @@ export class CouponsService {
           },
           area: true,
           category: true,
+          _count: {
+            select: {
+              savedBy: true,
+              redemptions: true,
+              viewEvents: true,
+            },
+          },
         },
         take: 13 - coupons.length,
         orderBy: [{ isWhitelisted: 'desc' }, { createdAt: 'desc' }],
@@ -161,15 +180,23 @@ export class CouponsService {
         select: { couponId: true },
       });
       const savedIds = new Set(savedCoupons.map((s) => s.couponId));
-      return coupons.map((c) => ({
+      return coupons.map((c: any) => ({
         ...c,
         isSaved: savedIds.has(c.id),
+        likes: c._count?.savedBy || 0,
+        redemptions: c._count?.redemptions || 0,
+        views: c._count?.viewEvents || 0,
+        _count: undefined,
       }));
     }
 
-    return coupons.map((c) => ({
+    return coupons.map((c: any) => ({
       ...c,
       isSaved: false,
+      likes: c._count?.savedBy || 0,
+      redemptions: c._count?.redemptions || 0,
+      views: c._count?.viewEvents || 0,
+      _count: undefined,
     }));
   }
 
@@ -284,6 +311,25 @@ export class CouponsService {
     };
   }
 
+  async trackView(couponId: string, userId?: string, source = 'APP') {
+    const coupon = await this.prisma.coupon.findUnique({
+      where: { id: couponId },
+      select: { id: true },
+    });
+    if (!coupon) throw new NotFoundException('Coupon not found');
+
+    await this.prisma.couponViewEvent.create({
+      data: {
+        couponId,
+        userId,
+        source,
+      },
+    });
+
+    const views = await this.prisma.couponViewEvent.count({ where: { couponId } });
+    return { couponId, views };
+  }
+
   async redeemCoupon(userId: string, couponId: string) {
     const coupon = await this.prisma.coupon.findUnique({
       where: { id: couponId },
@@ -365,5 +411,77 @@ export class CouponsService {
   async remove(id: string) {
     await this.prisma.coupon.delete({ where: { id } });
     return { id, deleted: true };
+  }
+
+  async notifyNearbyUsers(id: string) {
+    const coupon = await this.prisma.coupon.findUnique({
+      where: { id },
+      include: { merchant: true },
+    });
+    if (!coupon) throw new NotFoundException('Coupon not found');
+    if (!coupon.merchant.latitude || !coupon.merchant.longitude) {
+      throw new BadRequestException('Merchant location is missing');
+    }
+
+    const allUsers = await this.prisma.user.findMany({
+      where: { notificationsPaused: false, fcmToken: { not: null } },
+      select: { id: true, fcmToken: true, latitude: true, longitude: true },
+    });
+
+    const mLat = Number(coupon.merchant.latitude);
+    const mLon = Number(coupon.merchant.longitude);
+
+    const nearbyUsers = allUsers.filter((user) => {
+      if (!user.latitude || !user.longitude || !user.fcmToken) return false;
+      const uLat = Number(user.latitude);
+      const uLon = Number(user.longitude);
+      const distance = haversineDistanceMeters(
+        { latitude: uLat, longitude: uLon },
+        { latitude: mLat, longitude: mLon },
+      );
+      return distance <= 3000;
+    });
+
+    if (nearbyUsers.length === 0) {
+      return { sent: 0, message: 'No nearby users found' };
+    }
+
+    // We can use Expo/Firebase util directly, or `enqueueProximityNotification` which is private/public. 
+    // `enqueueProximityNotification` takes { userId, merchantId }. We want one broadcast.
+    
+    // Using NotificationsService.send won't filter by distance easily unless we create a custom SendNotificationDto.
+    // Instead we can send directly here using expo-push/firebase-push util if we want, or add a method to NotificationsService.
+    
+    // Actually, `enqueueProximityNotification` is public. But it's for 1 user.
+    // Let's just use the utils.
+    
+    const { sendExpoPushMessages } = await import('../notifications/expo-push.util.js');
+    const { sendFirebasePushMessages } = await import('../notifications/firebase-push.util.js');
+
+    await this.prisma.notification.createMany({
+      data: nearbyUsers.map((user) => ({
+        userId: user.id,
+        title: 'Hot Deal Nearby!',
+        body: `${coupon.title} is just around the corner at ${coupon.merchant.name}. Tap to grab it now!`,
+        data: { sourceType: 'COUPON', couponId: coupon.id },
+      })),
+    });
+
+    const messages = nearbyUsers.map(u => ({
+      to: u.fcmToken as string,
+      token: u.fcmToken as string,
+      title: 'Hot Deal Nearby!',
+      body: `${coupon.title} is just around the corner at ${coupon.merchant.name}. Tap to grab it now!`,
+      data: { sourceType: 'COUPON', couponId: coupon.id },
+      channelId: 'deals',
+    }));
+
+    const fcmMessages = messages.filter((m) => !m.to.startsWith('ExpoPushToken[') && !m.to.startsWith('ExponentPushToken['));
+    const expoMessages = messages.filter((m) => m.to.startsWith('ExpoPushToken[') || m.to.startsWith('ExponentPushToken['));
+
+    if (fcmMessages.length > 0) await sendFirebasePushMessages(fcmMessages);
+    if (expoMessages.length > 0) await sendExpoPushMessages(expoMessages);
+
+    return { sent: nearbyUsers.length, message: `Notification sent to ${nearbyUsers.length} users within 3km` };
   }
 }

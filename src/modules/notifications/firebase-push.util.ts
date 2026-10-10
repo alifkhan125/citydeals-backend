@@ -48,7 +48,13 @@ export async function sendFirebasePushMessages(messages: FirebasePushMessage[]) 
   const messaging = getFirebaseMessaging();
   const validMessages = messages.filter((message) => message.token);
   if (!messaging || validMessages.length === 0) {
-    return { sent: 0, skipped: messages.length, configured: Boolean(messaging) };
+    return {
+      sent: 0,
+      skipped: messages.length,
+      configured: Boolean(messaging),
+      missingTokens: messages.length - validMessages.length,
+      failures: [] as Array<{ index: number; message: string }>,
+    };
   }
 
   const responses = await Promise.allSettled(
@@ -80,9 +86,17 @@ export async function sendFirebasePushMessages(messages: FirebasePushMessage[]) 
   );
 
   const sent = responses.filter((response) => response.status === 'fulfilled').length;
+  const failures = responses.flatMap((response, index) => {
+    if (response.status === 'fulfilled') return [];
+    const message = response.reason instanceof Error ? response.reason.message : String(response.reason);
+    return [{ index, message }];
+  });
+
   return {
     sent,
     skipped: messages.length - sent,
     configured: true,
+    missingTokens: messages.length - validMessages.length,
+    failures: failures.slice(0, 5),
   };
 }

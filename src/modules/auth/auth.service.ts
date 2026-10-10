@@ -12,6 +12,8 @@ import { ChangePasswordDto } from './dto/change-password.dto.js';
 import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import { VerifyOtpDto } from './dto/verify-otp.dto.js';
 import { ResetPasswordDto } from './dto/reset-password.dto.js';
+import { OAuth2Client } from 'google-auth-library';
+import { GoogleLoginDto } from './dto/google-login.dto.js';
 
 import { NotificationsService } from '../notifications/notifications.service.js';
 
@@ -71,6 +73,58 @@ export class AuthService {
       },
     });
     return this.issueTokens(user);
+  }
+
+  async googleLogin(dto: GoogleLoginDto) {
+    const client = new OAuth2Client(this.configService.get('GOOGLE_CLIENT_ID'));
+    try {
+      const ticket = await client.verifyIdToken({
+        idToken: dto.idToken,
+        audience: [
+          this.configService.get('GOOGLE_WEB_CLIENT_ID') || '',
+          this.configService.get('GOOGLE_ANDROID_CLIENT_ID') || '',
+        ].filter(Boolean),
+      });
+      const payload = ticket.getPayload();
+      
+      if (!payload || !payload.email) {
+        throw new BadRequestException('Invalid Google token');
+      }
+
+      let user = await this.prisma.user.findUnique({
+        where: { email: payload.email },
+        include: {
+          area: {
+            select: { id: true, name: true, slug: true, city: true, state: true, latitude: true, longitude: true },
+          },
+        },
+      });
+
+      if (!user) {
+        // Register new user via Google
+        user = await this.prisma.user.create({
+          data: {
+            fullName: payload.name || 'Google User',
+            email: payload.email,
+            profilePictureUrl: payload.picture,
+            passwordHash: await bcrypt.hash(Math.random().toString(36).slice(-10), 12),
+            role: 'USER',
+            preferredLanguage: 'en',
+            acceptedTerms: true,
+            onboardingCompleted: true,
+          },
+          include: {
+            area: {
+              select: { id: true, name: true, slug: true, city: true, state: true, latitude: true, longitude: true },
+            },
+          },
+        });
+      }
+
+      return this.issueTokens(user);
+    } catch (error) {
+      throw new UnauthorizedException('Invalid Google token');
+    }
   }
 
   async login(dto: LoginDto) {
@@ -230,6 +284,17 @@ export class AuthService {
     }
     
     return updatedUser;
+  }
+
+  async syncPushToken(userId: string, fcmToken: string) {
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { fcmToken },
+      select: {
+        id: true,
+        fcmToken: true,
+      },
+    });
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto) {

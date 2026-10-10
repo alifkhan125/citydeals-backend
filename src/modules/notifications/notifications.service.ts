@@ -76,7 +76,7 @@ export class NotificationsService {
         userId,
         title,
         body,
-        data: { grouped: 'true', merchantIds: validMerchantIds },
+        data: { sourceType: 'NEARBY_DEALS', grouped: 'true', merchantIds: validMerchantIds },
       },
     });
 
@@ -89,9 +89,13 @@ export class NotificationsService {
     console.log(`[Push] Sending to token: ${token}`);
     try {
       if (token.startsWith('ExpoPushToken[') || token.startsWith('ExponentPushToken[')) {
-        await sendExpoPushMessages([{ to: token, title, body, data: { grouped: true }, channelId: 'deals' }]);
+        await sendExpoPushMessages([
+          { to: token, title, body, data: { sourceType: 'NEARBY_DEALS', grouped: true }, channelId: 'deals' },
+        ]);
       } else {
-        await sendFirebasePushMessages([{ token, title, body, data: { grouped: true } }]);
+        await sendFirebasePushMessages([
+          { token, title, body, data: { sourceType: 'NEARBY_DEALS', grouped: true } },
+        ]);
       }
       console.log(`[Push] Push sent successfully!`);
     } catch (err: any) {
@@ -107,6 +111,13 @@ export class NotificationsService {
         title: dto.title,
         body: dto.body,
         data: {
+          sourceType: dto.merchantId
+            ? 'MERCHANT'
+            : dto.areaId
+              ? 'AREA'
+              : dto.userId
+                ? 'USER'
+                : 'BROADCAST',
           sendTo: dto.sendTo ?? 'ALL',
           areaId: dto.areaId,
           scheduledAt: dto.scheduledAt,
@@ -148,6 +159,13 @@ export class NotificationsService {
       title: dto.title,
       body: dto.body,
       data: {
+        sourceType: dto.merchantId
+          ? 'MERCHANT'
+          : dto.areaId
+            ? 'AREA'
+            : dto.userId
+              ? 'USER'
+              : 'BROADCAST',
         sendTo: dto.sendTo ?? 'ALL',
         areaId: dto.areaId,
         userId: dto.userId,
