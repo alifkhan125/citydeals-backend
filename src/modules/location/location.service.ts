@@ -14,11 +14,15 @@ export class LocationService {
   ) {}
 
   async sync(user: { id: string }, dto: SyncLocationDto) {
+    const currentUser = await this.prisma.user.findUnique({
+      where: { id: user.id },
+      select: { notificationRadiusMeters: true },
+    });
     const area = await this.areasService.resolveArea(dto.latitude, dto.longitude);
     const merchants = area
       ? await this.prisma.merchant.findMany({
           where: { areaId: area.id, status: 'ACTIVE' },
-          include: { coupons: { where: { status: 'ACTIVE' } } },
+          include: { area: true, coupons: { where: { status: 'ACTIVE' } } },
         })
       : [];
 
@@ -27,10 +31,15 @@ export class LocationService {
         ...merchant,
         distanceMeters: haversineDistanceMeters(
           { latitude: dto.latitude, longitude: dto.longitude },
-          { latitude: Number(merchant.latitude), longitude: Number(merchant.longitude) },
+          { latitude: Number(merchant.area.latitude), longitude: Number(merchant.area.longitude) },
         ),
       }))
-      .filter((merchant) => merchant.distanceMeters <= merchant.radiusMeters && merchant.coupons.length > 0);
+      .filter(
+        (merchant) =>
+          merchant.distanceMeters <= merchant.radiusMeters &&
+          merchant.distanceMeters <= (currentUser?.notificationRadiusMeters ?? 2000) &&
+          merchant.coupons.length > 0,
+      );
 
     console.log(`Found ${nearbyMerchants.length} nearby merchants out of ${merchants.length} total merchants in area`);
 
@@ -57,9 +66,9 @@ export class LocationService {
       area,
       geofences: merchants.map((merchant) => ({
         merchantId: merchant.id,
-        latitude: merchant.latitude,
-        longitude: merchant.longitude,
-        radiusMeters: merchant.radiusMeters,
+        latitude: merchant.area.latitude,
+        longitude: merchant.area.longitude,
+        radiusMeters: merchant.area.radiusMeters,
       })),
     };
   }

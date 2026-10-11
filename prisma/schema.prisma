@@ -45,6 +45,7 @@ model User {
   profilePictureUrl  String?
   dateOfBirth        DateTime?
   notificationsPaused Boolean @default(false)
+  notificationRadiusMeters Int @default(2000)
   passwordHash       String
   role               Role     @default(USER)
   status             UserStatus @default(ACTIVE)

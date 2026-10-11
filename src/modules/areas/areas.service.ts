@@ -105,13 +105,30 @@ export class AreasService {
         ? await this.qrService.generateAreaQrCode(updateData.slug)
         : undefined;
 
-    return this.prisma.area.update({
+    const updatedArea = await this.prisma.area.update({
       where: { id },
       data: {
         ...updateData,
         ...(qrCodeUrl ? { qrCodeUrl } : {}),
       },
     });
+
+    if (
+      updateData.latitude !== undefined ||
+      updateData.longitude !== undefined ||
+      updateData.radiusMeters !== undefined
+    ) {
+      await this.prisma.merchant.updateMany({
+        where: { areaId: id },
+        data: {
+          latitude: Number(updatedArea.latitude),
+          longitude: Number(updatedArea.longitude),
+          radiusMeters: Number(updatedArea.radiusMeters),
+        },
+      });
+    }
+
+    return updatedArea;
   }
 
   async remove(id: string) {

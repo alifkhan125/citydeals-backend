@@ -21,6 +21,7 @@ export class UsersService {
         role: true,
         preferredLanguage: true,
         notificationsPaused: true,
+        notificationRadiusMeters: true,
         onboardingCompleted: true,
         latitude: true,
         longitude: true,
@@ -107,8 +108,11 @@ export class UsersService {
     await this.ensureUser(userId);
     return this.prisma.user.update({
       where: { id: userId },
-      data: { notificationsPaused: dto.notificationsPaused },
-      select: { id: true, notificationsPaused: true },
+      data: {
+        notificationsPaused: dto.notificationsPaused,
+        notificationRadiusMeters: dto.notificationRadiusMeters,
+      },
+      select: { id: true, notificationsPaused: true, notificationRadiusMeters: true },
     });
   }
 

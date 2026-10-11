@@ -157,8 +157,8 @@ export class CouponsService {
       const userLon = Number(userRecord.longitude);
       
       coupons = coupons.map(c => {
-        const mLat = Number(c.merchant.latitude);
-        const mLon = Number(c.merchant.longitude);
+        const mLat = Number(c.area.latitude);
+        const mLon = Number(c.area.longitude);
         const distanceMeters = (mLat && mLon) 
           ? haversineDistanceMeters({ latitude: userLat, longitude: userLon }, { latitude: mLat, longitude: mLon })
           : Infinity;
@@ -416,11 +416,11 @@ export class CouponsService {
   async notifyNearbyUsers(id: string) {
     const coupon = await this.prisma.coupon.findUnique({
       where: { id },
-      include: { merchant: true },
+      include: { merchant: true, area: true },
     });
     if (!coupon) throw new NotFoundException('Coupon not found');
-    if (!coupon.merchant.latitude || !coupon.merchant.longitude) {
-      throw new BadRequestException('Merchant location is missing');
+    if (!coupon.area.latitude || !coupon.area.longitude) {
+      throw new BadRequestException('Area location is missing');
     }
 
     const allUsers = await this.prisma.user.findMany({
@@ -428,8 +428,8 @@ export class CouponsService {
       select: { id: true, fcmToken: true, latitude: true, longitude: true },
     });
 
-    const mLat = Number(coupon.merchant.latitude);
-    const mLon = Number(coupon.merchant.longitude);
+    const mLat = Number(coupon.area.latitude);
+    const mLon = Number(coupon.area.longitude);
 
     const nearbyUsers = allUsers.filter((user) => {
       if (!user.latitude || !user.longitude || !user.fcmToken) return false;

@@ -36,10 +36,10 @@ export class MerchantsService {
         instagramUrl: dto.instagramUrl,
         facebookUrl: dto.facebookUrl,
         tiktokUrl: dto.tiktokUrl,
-        radiusMeters: dto.radiusMeters ?? 3000,
+        radiusMeters: dto.radiusMeters ?? Number(area.radiusMeters),
         status: dto.status ?? 'ACTIVE',
-        latitude: dto.latitude ?? Number(area.latitude),
-        longitude: dto.longitude ?? Number(area.longitude),
+        latitude: Number(area.latitude),
+        longitude: Number(area.longitude),
         areaId,
         ownerId: user.role === 'ADVERTISER' ? user.id : undefined,
       },
@@ -56,10 +56,20 @@ export class MerchantsService {
     });
   }
 
-  update(id: string, dto: Partial<CreateMerchantDto>) {
+  async update(id: string, dto: Partial<CreateMerchantDto>) {
     const data: any = { ...dto };
     if (data.categoryId === '') {
       data.categoryId = null;
+    }
+    if (data.areaId) {
+      const area = await this.prisma.area.findUnique({ where: { id: data.areaId } });
+      if (!area) throw new NotFoundException('Area not found');
+      data.latitude = Number(area.latitude);
+      data.longitude = Number(area.longitude);
+      data.radiusMeters = data.radiusMeters ?? Number(area.radiusMeters);
+    } else {
+      delete data.latitude;
+      delete data.longitude;
     }
     return this.prisma.merchant.update({
       where: { id },

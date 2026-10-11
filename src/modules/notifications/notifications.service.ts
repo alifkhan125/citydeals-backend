@@ -133,18 +133,18 @@ export class NotificationsService {
   private resolveRecipients(dto: SendNotificationDto) {
     if (dto.sendTo === 'USER' && dto.userId) {
       return this.prisma.user.findMany({
-        where: { id: dto.userId, notificationsPaused: false },
+        where: { id: dto.userId },
         select: { id: true, fcmToken: true },
       });
     }
     if (dto.sendTo === 'AREA' && dto.areaId) {
       return this.prisma.user.findMany({
-        where: { areaId: dto.areaId, notificationsPaused: false },
+        where: { areaId: dto.areaId },
         select: { id: true, fcmToken: true },
       });
     }
     return this.prisma.user.findMany({
-      where: { notificationsPaused: false },
+      where: {},
       select: { id: true, fcmToken: true },
     });
   }
@@ -153,19 +153,22 @@ export class NotificationsService {
     users: Array<{ id: string; fcmToken: string | null }>,
     dto: SendNotificationDto,
   ) {
-    const messages = users.map((user) => ({
-      token: user.fcmToken ?? '',
-      to: user.fcmToken ?? '',
+    const sourceType = dto.merchantId
+      ? 'MERCHANT'
+      : dto.areaId
+        ? 'AREA'
+        : dto.userId
+          ? 'USER'
+          : 'BROADCAST';
+    const usersWithTokens = users.filter((user) => user.fcmToken?.trim());
+    const missingTokens = users.length - usersWithTokens.length;
+    const messages = usersWithTokens.map((user) => ({
+      token: user.fcmToken!.trim(),
+      to: user.fcmToken!.trim(),
       title: dto.title,
       body: dto.body,
       data: {
-        sourceType: dto.merchantId
-          ? 'MERCHANT'
-          : dto.areaId
-            ? 'AREA'
-            : dto.userId
-              ? 'USER'
-              : 'BROADCAST',
+        sourceType,
         sendTo: dto.sendTo ?? 'ALL',
         areaId: dto.areaId,
         userId: dto.userId,
@@ -181,15 +184,35 @@ export class NotificationsService {
         sendFirebasePushMessages(fcmMessages),
         sendExpoPushMessages(expoMessages),
       ]);
+      const staleTokens = fcm.failures
+        ?.filter((failure) => /notregistered|registration-token-not-registered/i.test(failure.message))
+        .map((failure) => fcmMessages[failure.index]?.token)
+        .filter(Boolean) as string[] | undefined;
+      if (staleTokens?.length) {
+        await this.prisma.user.updateMany({
+          where: { fcmToken: { in: staleTokens } },
+          data: { fcmToken: null },
+        });
+      }
       return {
         sent: fcm.sent + expo.sent,
-        skipped: fcm.skipped + expo.skipped,
+        skipped: missingTokens + fcm.skipped + expo.skipped,
+        totalRecipients: users.length,
+        usersWithTokens: usersWithTokens.length,
+        missingTokens,
         fcm,
         expo,
       };
     } catch (error) {
       this.logger.warn(error instanceof Error ? error.message : String(error));
-      return { sent: 0, skipped: users.length };
+      return {
+        sent: 0,
+        skipped: users.length,
+        totalRecipients: users.length,
+        usersWithTokens: usersWithTokens.length,
+        missingTokens,
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 

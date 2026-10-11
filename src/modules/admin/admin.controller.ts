@@ -25,6 +25,7 @@ export class AdminController {
   ) {}
 
   // ─── Dashboard (no permission restriction — all staff can view) ───────────
+  @Get('dashboard/overview') overview() { return this.dashboard.overview(); }
   @Get('dashboard/stats') stats() { return this.dashboard.stats(); }
   @Get('dashboard/redemptions/daily') daily() { return this.dashboard.dailyRedemptions(); }
   @Get('dashboard/redemptions/by-area') byArea() { return this.dashboard.redemptionsByArea(); }

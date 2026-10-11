@@ -172,6 +172,8 @@ export class AuthService {
         profilePictureUrl: true,
         role: true,
         status: true,
+        notificationsPaused: true,
+        notificationRadiusMeters: true,
         areaId: true,
         latitude: true,
         longitude: true,
@@ -236,6 +238,7 @@ export class AuthService {
         areaId: true,
         latitude: true,
         longitude: true,
+        notificationRadiusMeters: true,
         area: {
           select: {
             id: true,
@@ -254,7 +257,7 @@ export class AuthService {
     const merchants = area
       ? await this.prisma.merchant.findMany({
           where: { areaId: area.id, status: 'ACTIVE' },
-          include: { coupons: { where: { status: 'ACTIVE' } } },
+          include: { area: true, coupons: { where: { status: 'ACTIVE' } } },
         })
       : [];
 
@@ -264,10 +267,15 @@ export class AuthService {
         ...merchant,
         distanceMeters: haversineDistanceMeters(
           { latitude: dto.latitude, longitude: dto.longitude },
-          { latitude: Number(merchant.latitude), longitude: Number(merchant.longitude) },
+            { latitude: Number(merchant.area.latitude), longitude: Number(merchant.area.longitude) },
         ),
       }))
-      .filter((merchant) => merchant.distanceMeters <= merchant.radiusMeters && merchant.coupons.length > 0);
+      .filter(
+        (merchant) =>
+          merchant.distanceMeters <= merchant.radiusMeters &&
+          merchant.distanceMeters <= updatedUser.notificationRadiusMeters &&
+          merchant.coupons.length > 0,
+      );
 
     if (nearbyMerchants.length > 0) {
       const merchantIds = nearbyMerchants.map((m) => m.id);

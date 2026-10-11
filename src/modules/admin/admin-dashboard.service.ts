@@ -5,6 +5,17 @@ import { PrismaService } from '../../database/prisma.service.js';
 export class AdminDashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async overview() {
+    const [stats, trending, areaRedemptions, dailyRedemptions] = await Promise.all([
+      this.stats(),
+      this.trendingCoupons(),
+      this.redemptionsByArea(),
+      this.dailyRedemptions(),
+    ]);
+
+    return { stats, trending, areaRedemptions, dailyRedemptions };
+  }
+
   async stats() {
     const [businesses, registeredUsers, coupons, liveCoupons, couponsSaved, redemptions] = await Promise.all([
       this.prisma.merchant.count(),
