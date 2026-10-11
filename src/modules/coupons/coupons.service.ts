@@ -259,14 +259,19 @@ export class CouponsService {
       }));
   }
 
-  update(id: string, dto: UpdateCouponDto = {}) {
+  async update(id: string, dto: UpdateCouponDto = {}) {
     const { startsAt, expiresAt, merchantId, categoryId, ...data } = dto;
     const updateData: any = {
       ...data,
       startsAt: startsAt ? new Date(startsAt) : undefined,
       expiresAt: expiresAt ? new Date(expiresAt) : undefined,
     };
-    if (merchantId) updateData.merchantId = merchantId;
+    if (merchantId) {
+      const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
+      if (!merchant) throw new NotFoundException('Merchant not found');
+      updateData.merchantId = merchantId;
+      updateData.areaId = merchant.areaId;
+    }
     if (categoryId !== undefined) updateData.categoryId = categoryId;
 
     return this.prisma.coupon.update({
