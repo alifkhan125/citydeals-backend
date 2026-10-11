@@ -45,7 +45,7 @@ export class NotificationsService {
       where: { userId, merchantId: { in: merchantIds } },
     });
     
-    const COOLDOWN_MS = 60 * 1000; // 1 minute
+    const COOLDOWN_MS = 30 * 1000; // 1 minute
     const now = Date.now();
     const cooledDownMerchantIds = new Set(
       cooldowns.filter((c) => now - c.lastSentAt.getTime() < COOLDOWN_MS).map((c) => c.merchantId)

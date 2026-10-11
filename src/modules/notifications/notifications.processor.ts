@@ -7,7 +7,7 @@ import { SendNotificationDto } from './dto/send-notification.dto.js';
 import { sendExpoPushMessages } from './expo-push.util.js';
 import { sendFirebasePushMessages } from './firebase-push.util.js';
 
-const COOLDOWN_MS = 60 * 1000; // 1 minute for testing
+const COOLDOWN_MS = 30 * 1000; // 1 minute for testing
 
 @Injectable()
 @Processor(PROXIMITY_QUEUE)

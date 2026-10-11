@@ -157,8 +157,8 @@ export class CouponsService {
       const userLon = Number(userRecord.longitude);
       
       coupons = coupons.map(c => {
-        const mLat = Number(c.area.latitude);
-        const mLon = Number(c.area.longitude);
+        const mLat = Number(c.merchant?.latitude ?? c.area?.latitude);
+        const mLon = Number(c.merchant?.longitude ?? c.area?.longitude);
         const distanceMeters = (mLat && mLon) 
           ? haversineDistanceMeters({ latitude: userLat, longitude: userLon }, { latitude: mLat, longitude: mLon })
           : Infinity;
