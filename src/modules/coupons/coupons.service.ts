@@ -230,8 +230,38 @@ export class CouponsService {
   async findSavedCoupons(userId: string) {
     const saved = await this.prisma.savedCoupon.findMany({
       where: { userId },
-      include: { coupon: { include: { merchant: true, area: true, category: true } } },
+      select: {
+        coupon: {
+          select: {
+            id: true,
+            title: true,
+            description: true,
+            imageUrl: true,
+            couponCode: true,
+            couponLink: true,
+            shareSlug: true,
+            status: true,
+            startsAt: true,
+            expiresAt: true,
+            areaId: true,
+            merchantId: true,
+            categoryId: true,
+            isWhitelisted: true,
+            createdAt: true,
+            updatedAt: true,
+            category: {
+              select: {
+                id: true,
+                name: true,
+                slug: true,
+                iconUrl: true,
+              },
+            },
+          },
+        },
+      },
       orderBy: { createdAt: 'desc' },
+      take: 100,
     });
     return saved.filter((s) => s.coupon).map((s) => ({ ...s.coupon, isSaved: true }));
   }
