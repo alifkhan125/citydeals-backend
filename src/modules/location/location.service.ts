@@ -31,7 +31,10 @@ export class LocationService {
         ...merchant,
         distanceMeters: haversineDistanceMeters(
           { latitude: dto.latitude, longitude: dto.longitude },
-          { latitude: Number(merchant.area.latitude), longitude: Number(merchant.area.longitude) },
+          {
+            latitude: Number(merchant.latitude ?? merchant.area.latitude),
+            longitude: Number(merchant.longitude ?? merchant.area.longitude),
+          },
         ),
       }))
       .filter(
