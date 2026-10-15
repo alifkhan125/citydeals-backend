@@ -454,8 +454,11 @@ export class CouponsService {
       include: { merchant: true, area: true },
     });
     if (!coupon) throw new NotFoundException('Coupon not found');
-    if (!coupon.area.latitude || !coupon.area.longitude) {
-      throw new BadRequestException('Area location is missing');
+    const targetLat = coupon.merchant?.latitude || coupon.area?.latitude;
+    const targetLon = coupon.merchant?.longitude || coupon.area?.longitude;
+
+    if (!targetLat || !targetLon) {
+      throw new BadRequestException('Merchant or Area location coordinates are missing');
     }
 
     const allUsers = await this.prisma.user.findMany({
@@ -463,8 +466,8 @@ export class CouponsService {
       select: { id: true, fcmToken: true, latitude: true, longitude: true },
     });
 
-    const mLat = Number(coupon.area.latitude);
-    const mLon = Number(coupon.area.longitude);
+    const mLat = Number(targetLat);
+    const mLon = Number(targetLon);
 
     const nearbyUsers = allUsers.filter((user) => {
       if (!user.latitude || !user.longitude || !user.fcmToken) return false;
@@ -478,36 +481,36 @@ export class CouponsService {
     });
 
     if (nearbyUsers.length === 0) {
-      return { sent: 0, message: 'No nearby users found' };
+      return { sent: 0, message: 'No nearby users found with notifications enabled within 3km' };
     }
 
-    // We can use Expo/Firebase util directly, or `enqueueProximityNotification` which is private/public. 
-    // `enqueueProximityNotification` takes { userId, merchantId }. We want one broadcast.
-    
-    // Using NotificationsService.send won't filter by distance easily unless we create a custom SendNotificationDto.
-    // Instead we can send directly here using expo-push/firebase-push util if we want, or add a method to NotificationsService.
-    
-    // Actually, `enqueueProximityNotification` is public. But it's for 1 user.
-    // Let's just use the utils.
-    
     const { sendExpoPushMessages } = await import('../notifications/expo-push.util.js');
     const { sendFirebasePushMessages } = await import('../notifications/firebase-push.util.js');
+
+    const notificationTitle = 'Hot Deal Nearby!';
+    const notificationBody = `${coupon.title} is just around the corner at ${coupon.merchant?.name || 'a nearby store'}. Tap to grab it now!`;
+    const notificationData = {
+      sourceType: 'COUPON',
+      couponId: coupon.id,
+      title: notificationTitle,
+      body: notificationBody,
+    };
 
     await this.prisma.notification.createMany({
       data: nearbyUsers.map((user) => ({
         userId: user.id,
-        title: 'Hot Deal Nearby!',
-        body: `${coupon.title} is just around the corner at ${coupon.merchant.name}. Tap to grab it now!`,
-        data: { sourceType: 'COUPON', couponId: coupon.id },
+        title: notificationTitle,
+        body: notificationBody,
+        data: notificationData,
       })),
     });
 
-    const messages = nearbyUsers.map(u => ({
+    const messages = nearbyUsers.map((u) => ({
       to: u.fcmToken as string,
       token: u.fcmToken as string,
-      title: 'Hot Deal Nearby!',
-      body: `${coupon.title} is just around the corner at ${coupon.merchant.name}. Tap to grab it now!`,
-      data: { sourceType: 'COUPON', couponId: coupon.id },
+      title: notificationTitle,
+      body: notificationBody,
+      data: notificationData,
       channelId: 'deals',
     }));
 
@@ -517,6 +520,6 @@ export class CouponsService {
     if (fcmMessages.length > 0) await sendFirebasePushMessages(fcmMessages);
     if (expoMessages.length > 0) await sendExpoPushMessages(expoMessages);
 
-    return { sent: nearbyUsers.length, message: `Notification sent to ${nearbyUsers.length} users within 3km` };
+    return { sent: nearbyUsers.length, message: `Notification sent to ${nearbyUsers.length} user(s) within 3km` };
   }
 }
