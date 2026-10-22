@@ -13,6 +13,7 @@ export class CategoriesService {
 
   findAll() {
     return this.prisma.category.findMany({
+      where: { isDeleted: false },
       include: {
         _count: {
           select: { coupons: true, merchants: true },
@@ -24,11 +25,11 @@ export class CategoriesService {
 
   async findCoupons(categorySlugOrId: string, areaSlug?: string) {
     const category = await this.prisma.category.findFirst({
-      where: { OR: [{ slug: categorySlugOrId }, { id: categorySlugOrId }] },
+      where: { isDeleted: false, OR: [{ slug: categorySlugOrId }, { id: categorySlugOrId }] },
     });
     if (!category) throw new NotFoundException('Category not found');
 
-    const area = areaSlug ? await this.prisma.area.findUnique({ where: { slug: areaSlug } }) : null;
+    const area = areaSlug ? await this.prisma.area.findFirst({ where: { slug: areaSlug, isDeleted: false } }) : null;
     if (areaSlug && !area) throw new NotFoundException('Area not found');
 
     return this.prisma.coupon.findMany({
@@ -36,6 +37,8 @@ export class CategoriesService {
         categoryId: category.id,
         areaId: area?.id,
         status: 'ACTIVE',
+        area: { isDeleted: false },
+        merchant: { isDeleted: false },
       },
       include: { merchant: true, area: true, category: true },
       orderBy: [{ isWhitelisted: 'desc' }, { createdAt: 'desc' }],
@@ -50,11 +53,9 @@ export class CategoriesService {
   }
 
   async remove(id: string) {
-    await this.prisma.$transaction([
-      this.prisma.merchant.updateMany({ where: { categoryId: id }, data: { categoryId: null } }),
-      this.prisma.coupon.updateMany({ where: { categoryId: id }, data: { categoryId: null } }),
-      this.prisma.category.delete({ where: { id } }),
-    ]);
-    return { id, deleted: true };
+    const category = await this.prisma.category.findUnique({ where: { id } });
+    if (!category) throw new NotFoundException('Category not found');
+    await this.prisma.category.update({ where: { id }, data: { isDeleted: true } });
+    return { id, deleted: true, softDeleted: true };
   }
 }

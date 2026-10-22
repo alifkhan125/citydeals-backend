@@ -10,7 +10,7 @@ export class SearchService {
     const page = Math.max(Number(query.page ?? 1), 1);
     const limit = Math.min(Math.max(Number(query.limit ?? 20), 1), 50);
     const area = query.areaSlug
-      ? await this.prisma.area.findUnique({ where: { slug: query.areaSlug } })
+      ? await this.prisma.area.findFirst({ where: { slug: query.areaSlug, isDeleted: false } })
       : null;
     const areaId = user?.role === 'ADMIN' ? area?.id ?? user.areaId : area?.id ?? user?.areaId;
     if (!areaId) throw new ForbiddenException('Area scope is required');

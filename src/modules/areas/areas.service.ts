@@ -44,6 +44,7 @@ export class AreasService {
 
   findAll() {
     return this.prisma.area.findMany({
+      where: { isDeleted: false },
       include: {
         _count: {
           select: {
@@ -57,19 +58,20 @@ export class AreasService {
   }
 
   async findBySlug(slug: string) {
-    const area = await this.prisma.area.findUnique({ where: { slug } });
+    const area = await this.prisma.area.findFirst({ where: { slug, isDeleted: false } });
     if (!area) throw new NotFoundException('Area not found');
     return area;
   }
 
   async getDirectoryData(slug: string) {
-    const area = await this.prisma.area.findUnique({
-      where: { slug },
+    const area = await this.prisma.area.findFirst({
+      where: { slug, isDeleted: false },
       include: {
         merchants: {
+          where: { isDeleted: false },
           include: {
             coupons: {
-              where: { status: 'ACTIVE' },
+              where: { status: 'ACTIVE', merchant: { isDeleted: false } },
               orderBy: { createdAt: 'desc' },
             },
           },
@@ -77,7 +79,7 @@ export class AreasService {
         },
       },
     });
-    if (!area) throw new NotFoundException('Area not found');
+    if (!area || area.isDeleted) throw new NotFoundException('Area not found');
 
     return area;
   }
@@ -137,23 +139,20 @@ export class AreasService {
       select: {
         id: true,
         name: true,
+        isDeleted: true,
         _count: { select: { merchants: true, coupons: true } },
       },
     });
     if (!area) throw new NotFoundException('Area not found');
 
-    if (area._count.merchants > 0 || area._count.coupons > 0) {
-      throw new ConflictException(
-        `Cannot delete "${area.name}" while it has ${area._count.merchants} merchant(s) and ${area._count.coupons} coupon(s). Reassign or remove them first.`,
-      );
-    }
+    if (area.isDeleted) return { id, deleted: true, softDeleted: true };
 
-    await this.prisma.area.delete({ where: { id } });
-    return { id, deleted: true };
+    await this.prisma.area.update({ where: { id }, data: { isDeleted: true } });
+    return { id, deleted: true, softDeleted: true };
   }
 
   async resolveArea(latitude: number, longitude: number) {
-    const areas = await this.prisma.area.findMany();
+    const areas = await this.prisma.area.findMany({ where: { isDeleted: false } });
     if (areas.length === 0) return null;
 
     const sorted = areas
@@ -170,14 +169,14 @@ export class AreasService {
   }
 
   async regenerateQr(id: string) {
-    const area = await this.prisma.area.findUnique({ where: { id } });
+    const area = await this.prisma.area.findFirst({ where: { id, isDeleted: false } });
     if (!area) throw new NotFoundException('Area not found');
     const qrCodeUrl = await this.qrService.generateAreaQrCode(area.slug);
     return this.prisma.area.update({ where: { id }, data: { qrCodeUrl } });
   }
 
   async regenerateAllQr() {
-    const areas = await this.prisma.area.findMany();
+    const areas = await this.prisma.area.findMany({ where: { isDeleted: false } });
     const results = await Promise.all(
       areas.map(async (area) => {
         try {

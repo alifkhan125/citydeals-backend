@@ -52,7 +52,7 @@ export class CouponsService {
 
     if (!isAllArea) {
       if (!areaId && filter.areaSlug) {
-        const area = await this.prisma.area.findUnique({ where: { slug: filter.areaSlug } });
+        const area = await this.prisma.area.findFirst({ where: { slug: filter.areaSlug, isDeleted: false } });
         areaId = area?.id;
       }
     } else {
@@ -67,7 +67,11 @@ export class CouponsService {
       categoryId = category?.id;
     }
 
-    const whereClause: any = {};
+    const whereClause: any = {
+      area: { isDeleted: false },
+      merchant: { isDeleted: false },
+      OR: [{ categoryId: null }, { category: { isDeleted: false } }],
+    };
 
     if (user?.role === 'ADMIN' || user?.role === 'STAFF') {
       if (filter.status) {
@@ -454,19 +458,16 @@ export class CouponsService {
   async remove(id: string) {
     const coupon = await this.prisma.coupon.findUnique({
       where: { id },
-      select: { id: true },
+      select: { id: true, status: true },
     });
     if (!coupon) throw new NotFoundException('Coupon not found');
 
-    await this.prisma.$transaction(async (tx) => {
-      await tx.couponRedemption.deleteMany({ where: { couponId: id } });
-      await tx.savedCoupon.deleteMany({ where: { couponId: id } });
-      await tx.couponShareEvent.deleteMany({ where: { couponId: id } });
-      await tx.couponViewEvent.deleteMany({ where: { couponId: id } });
-      await tx.coupon.delete({ where: { id } });
+    await this.prisma.coupon.update({
+      where: { id },
+      data: { status: 'ARCHIVED' },
     });
 
-    return { id, deleted: true };
+    return { id, deleted: true, softDeleted: true, status: 'ARCHIVED' };
   }
 
   async notifyNearbyUsers(id: string) {

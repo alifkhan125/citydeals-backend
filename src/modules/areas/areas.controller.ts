@@ -1,8 +1,10 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Roles } from '../../common/decorators/roles.decorator.js';
+import { RequirePermission } from '../../common/decorators/require-permission.decorator.js';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
+import { StaffPermissionGuard } from '../../common/guards/staff-permission.guard.js';
 import { AreasService } from './areas.service.js';
 import { CreateAreaDto } from './dto/create-area.dto.js';
 import { UpdateAreaDto } from './dto/update-area.dto.js';
@@ -63,9 +65,10 @@ export class AreasController {
     return this.areasService.update(id, dto);
   }
 
-  @UseGuards(JwtAuthGuard, RolesGuard)
+  @UseGuards(JwtAuthGuard, RolesGuard, StaffPermissionGuard)
   @ApiBearerAuth('access-token')
   @Roles('ADMIN')
+  @RequirePermission('delete-content')
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.areasService.remove(id);

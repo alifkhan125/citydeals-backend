@@ -21,7 +21,7 @@ export class LocationService {
     const area = await this.areasService.resolveArea(dto.latitude, dto.longitude);
     const merchants = area
       ? await this.prisma.merchant.findMany({
-          where: { areaId: area.id, status: 'ACTIVE' },
+          where: { areaId: area.id, status: 'ACTIVE', isDeleted: false },
           include: { area: true, coupons: { where: { status: 'ACTIVE' } } },
         })
       : [];

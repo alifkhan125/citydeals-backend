@@ -161,7 +161,7 @@ export class AdminService {
   }
 
   async staff() {
-    let list = await this.prisma.staffAccount.findMany({ orderBy: { createdAt: 'desc' } });
+    let list = await this.prisma.staffAccount.findMany({ where: { isDeleted: false }, orderBy: { createdAt: 'desc' } });
     if (list.length === 0) {
       const defaults = [
         { fullName: 'Shuvo Ahmed', email: 'shuvo@citydeals.test', roleKey: 'Administrator' },
@@ -178,7 +178,7 @@ export class AdminService {
           },
         }).catch(() => null);
       }
-      list = await this.prisma.staffAccount.findMany({ orderBy: { createdAt: 'desc' } });
+      list = await this.prisma.staffAccount.findMany({ where: { isDeleted: false }, orderBy: { createdAt: 'desc' } });
     }
     return list;
   }
@@ -255,7 +255,8 @@ export class AdminService {
     if (!staff) {
       throw new NotFoundException('Staff account not found');
     }
-    return this.prisma.staffAccount.delete({ where: { id } });
+    await this.prisma.staffAccount.update({ where: { id }, data: { isDeleted: true } });
+    return { id, deleted: true, softDeleted: true };
   }
 
   async roles() {
