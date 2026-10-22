@@ -132,6 +132,22 @@ export class AreasService {
   }
 
   async remove(id: string) {
+    const area = await this.prisma.area.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        _count: { select: { merchants: true, coupons: true } },
+      },
+    });
+    if (!area) throw new NotFoundException('Area not found');
+
+    if (area._count.merchants > 0 || area._count.coupons > 0) {
+      throw new ConflictException(
+        `Cannot delete "${area.name}" while it has ${area._count.merchants} merchant(s) and ${area._count.coupons} coupon(s). Reassign or remove them first.`,
+      );
+    }
+
     await this.prisma.area.delete({ where: { id } });
     return { id, deleted: true };
   }

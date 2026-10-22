@@ -147,6 +147,8 @@ export class AuthService {
     if (!user || !(await bcrypt.compare(dto.password, user.passwordHash))) {
       throw new UnauthorizedException('Invalid credentials');
     }
+    if (user.status === 'BANNED') throw new ForbiddenException('This user is banned');
+    if (user.status === 'SUSPENDED') throw new ForbiddenException('This user is suspended');
 
     // If ADMIN role, look up their StaffAccount to get the roleKey for permission checks
     let staffRoleKey: string | undefined;

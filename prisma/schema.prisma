@@ -13,7 +13,7 @@ enum Role {
 }
 
 enum CouponStatus {
-  DRAFT
+  ARCHIVED
   ACTIVE
   EXPIRED
   SUSPENDED
@@ -153,7 +153,7 @@ model Coupon {
   discussion  String?
   terms       String?
   shareSlug   String       @unique
-  status      CouponStatus @default(DRAFT)
+  status      CouponStatus @default(ARCHIVED)
   startsAt    DateTime?
   expiresAt   DateTime?
   areaId      String

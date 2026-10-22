@@ -92,32 +92,42 @@ export class NotificationsService implements OnModuleInit {
       return;
     }
 
-    const cooldowns = await this.prisma.notificationCooldown.findMany({
-      where: { userId, merchantId: { in: merchantIds } },
-    });
-
     const COOLDOWN_MS = 12 * 60 * 60 * 1000; // 12 hours between proximity alerts
     const now = Date.now();
-    const cooledDownMerchantIds = new Set(
-      cooldowns.filter((c) => now - c.lastSentAt.getTime() < COOLDOWN_MS).map((c) => c.merchantId)
-    );
+    const cooldownCutoff = new Date(now - COOLDOWN_MS);
+    const validMerchantIds: string[] = [];
 
-    const validMerchantIds = merchantIds.filter((id) => !cooledDownMerchantIds.has(id));
+    // Claim each merchant atomically. Concurrent location syncs can then only
+    // let one request send the proximity alert for a merchant.
+    for (const merchantId of [...new Set(merchantIds)]) {
+      const claimed = await this.prisma.notificationCooldown.updateMany({
+        where: {
+          userId,
+          merchantId,
+          lastSentAt: { lt: cooldownCutoff },
+        },
+        data: { lastSentAt: new Date(now) },
+      });
+
+      if (claimed.count === 1) {
+        validMerchantIds.push(merchantId);
+        continue;
+      }
+
+      try {
+        await this.prisma.notificationCooldown.create({
+          data: { userId, merchantId, lastSentAt: new Date(now) },
+        });
+        validMerchantIds.push(merchantId);
+      } catch {
+        // Another concurrent request created the cooldown first.
+      }
+    }
+
     if (validMerchantIds.length === 0) {
       console.log(`[Push] All merchants on cooldown`);
       return;
     }
-
-    // Set new cooldowns
-    await Promise.all(
-      validMerchantIds.map((merchantId) =>
-        this.prisma.notificationCooldown.upsert({
-          where: { userId_merchantId: { userId, merchantId } },
-          update: { lastSentAt: new Date() },
-          create: { userId, merchantId, lastSentAt: new Date() },
-        })
-      )
-    );
 
     const title = 'New Deals Nearby!';
     const body = `We found ${totalCoupons} active coupons from ${validMerchantIds.length} restaurants near your location. Tap to view!`;
@@ -403,7 +413,13 @@ export class NotificationsService implements OnModuleInit {
         : dto.userId
           ? 'USER'
           : 'BROADCAST';
-    const usersWithTokens = users.filter((user) => user.fcmToken?.trim());
+    const usersWithTokens = Array.from(
+      new Map(
+        users
+          .filter((user) => user.fcmToken?.trim())
+          .map((user) => [user.fcmToken!.trim(), user]),
+      ).values(),
+    );
     const missingTokens = users.length - usersWithTokens.length;
     const messages = usersWithTokens.map((user) => ({
       token: user.fcmToken!.trim(),

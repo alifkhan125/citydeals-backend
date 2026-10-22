@@ -151,7 +151,12 @@ export class AdminService {
     });
   }
 
-  updateUserStatus(id: string, dto: UpdateUserStatusDto) {
+  async updateUserStatus(id: string, dto: UpdateUserStatusDto) {
+    const target = await this.prisma.user.findUnique({ where: { id }, select: { role: true } });
+    if (!target) throw new NotFoundException('User not found');
+    if (target.role === 'ADMIN' && dto.status !== 'ACTIVE') {
+      throw new ConflictException('Administrator accounts cannot be suspended or banned');
+    }
     return this.prisma.user.update({ where: { id }, data: { status: dto.status } });
   }
 

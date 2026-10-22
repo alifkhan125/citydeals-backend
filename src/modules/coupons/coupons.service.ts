@@ -37,7 +37,7 @@ export class CouponsService {
         categoryId: dto.categoryId,
         isWhitelisted: dto.isWhitelisted ?? false,
         shareSlug: randomUUID(),
-        status: dto.status ?? 'ACTIVE',
+        status: dto.status ?? 'ARCHIVED',
         startsAt: dto.startsAt ? new Date(dto.startsAt) : undefined,
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : undefined,
       },
@@ -229,7 +229,7 @@ export class CouponsService {
 
   async findSavedCoupons(userId: string) {
     const saved = await this.prisma.savedCoupon.findMany({
-      where: { userId },
+      where: { userId, coupon: { status: 'ACTIVE' } },
       select: {
         coupon: {
           select: {
@@ -327,6 +327,9 @@ export class CouponsService {
     if (!coupon) {
       throw new NotFoundException('Coupon not found');
     }
+    if (coupon.status !== 'ACTIVE') {
+      throw new NotFoundException('Coupon not found');
+    }
 
     let isSaved = false;
     let isRedeemed = false;
@@ -366,6 +369,11 @@ export class CouponsService {
   }
 
   async redeemCoupon(userId: string, couponId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { status: true } });
+    if (!user) throw new NotFoundException('User not found');
+    if (user.status === 'BANNED') throw new ForbiddenException('This user is banned');
+    if (user.status === 'SUSPENDED') throw new ForbiddenException('This user is suspended');
+
     const coupon = await this.prisma.coupon.findUnique({
       where: { id: couponId },
       include: { merchant: true },
@@ -444,7 +452,20 @@ export class CouponsService {
   }
 
   async remove(id: string) {
-    await this.prisma.coupon.delete({ where: { id } });
+    const coupon = await this.prisma.coupon.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!coupon) throw new NotFoundException('Coupon not found');
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.couponRedemption.deleteMany({ where: { couponId: id } });
+      await tx.savedCoupon.deleteMany({ where: { couponId: id } });
+      await tx.couponShareEvent.deleteMany({ where: { couponId: id } });
+      await tx.couponViewEvent.deleteMany({ where: { couponId: id } });
+      await tx.coupon.delete({ where: { id } });
+    });
+
     return { id, deleted: true };
   }
 

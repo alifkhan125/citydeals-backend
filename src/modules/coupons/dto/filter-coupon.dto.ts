@@ -5,7 +5,7 @@ import { CouponStatus } from './create-coupon.dto.js';
 export class FilterCouponDto {
   @ApiPropertyOptional({
     enum: CouponStatus,
-    description: 'Filter coupons by status (e.g. ACTIVE, DRAFT, EXPIRED).',
+    description: 'Filter coupons by status (e.g. ACTIVE, ARCHIVED, EXPIRED).',
   })
   @IsOptional()
   @IsEnum(CouponStatus)
