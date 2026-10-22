@@ -269,7 +269,10 @@ export class AuthService {
         ...merchant,
         distanceMeters: haversineDistanceMeters(
           { latitude: dto.latitude, longitude: dto.longitude },
-            { latitude: Number(merchant.area.latitude), longitude: Number(merchant.area.longitude) },
+            {
+              latitude: Number(merchant.latitude),
+              longitude: Number(merchant.longitude),
+            },
         ),
       }))
       .filter(
