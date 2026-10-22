@@ -17,12 +17,15 @@ export class SearchService {
 
     const text = query.q?.trim();
     const category = query.categorySlug
-      ? await this.prisma.category.findUnique({ where: { slug: query.categorySlug } })
+      ? await this.prisma.category.findFirst({ where: { slug: query.categorySlug, isDeleted: false } })
       : null;
 
     const where = {
       areaId,
       status: 'ACTIVE' as const,
+      isDeleted: false,
+      merchant: { isDeleted: false },
+      area: { isDeleted: false },
       categoryId: category?.id,
       OR: text
         ? [

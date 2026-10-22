@@ -20,8 +20,8 @@ export class AdminDashboardService {
     const [businesses, registeredUsers, coupons, liveCoupons, couponsSaved, redemptions] = await Promise.all([
       this.prisma.merchant.count(),
       this.prisma.user.count(),
-      this.prisma.coupon.count(),
-      this.prisma.coupon.count({ where: { status: 'ACTIVE' } }),
+      this.prisma.coupon.count({ where: { isDeleted: false } }),
+      this.prisma.coupon.count({ where: { status: 'ACTIVE', isDeleted: false } }),
       this.prisma.savedCoupon.count(),
       this.prisma.couponRedemption.count(),
     ]);
@@ -40,7 +40,8 @@ export class AdminDashboardService {
 
   async redemptionsByArea() {
     const areas = await this.prisma.area.findMany({
-      include: { coupons: { include: { _count: { select: { redemptions: true } } } } },
+      where: { isDeleted: false },
+      include: { coupons: { where: { isDeleted: false }, include: { _count: { select: { redemptions: true } } } } },
       orderBy: { name: 'asc' },
     });
     return areas.map((area) => ({
@@ -52,6 +53,7 @@ export class AdminDashboardService {
 
   trendingCoupons() {
     return this.prisma.coupon.findMany({
+      where: { isDeleted: false },
       include: {
         merchant: true,
         category: true,

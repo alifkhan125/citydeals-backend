@@ -157,6 +157,7 @@ model Coupon {
   terms       String?
   shareSlug   String       @unique
   status      CouponStatus @default(ARCHIVED)
+  isDeleted   Boolean      @default(false)
   startsAt    DateTime?
   expiresAt   DateTime?
   areaId      String

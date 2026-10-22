@@ -61,13 +61,14 @@ export class CouponsService {
 
     let categoryId = filter.categoryId;
     if (!categoryId && filter.categorySlug && filter.categorySlug.toLowerCase() !== 'all') {
-      const category = await this.prisma.category.findUnique({
-        where: { slug: filter.categorySlug.toLowerCase() },
+      const category = await this.prisma.category.findFirst({
+        where: { slug: filter.categorySlug.toLowerCase(), isDeleted: false },
       });
       categoryId = category?.id;
     }
 
     const whereClause: any = {
+      isDeleted: false,
       area: { isDeleted: false },
       merchant: { isDeleted: false },
       OR: [{ categoryId: null }, { category: { isDeleted: false } }],
@@ -209,7 +210,7 @@ export class CouponsService {
       where: { shareSlug },
       include: { merchant: true, area: true, category: true },
     });
-    if (!coupon || coupon.status !== 'ACTIVE') {
+    if (!coupon || coupon.isDeleted || coupon.status !== 'ACTIVE') {
       throw new NotFoundException('Coupon not found');
     }
     return coupon;
@@ -217,7 +218,7 @@ export class CouponsService {
 
   async saveCoupon(userId: string, couponId: string) {
     const coupon = await this.prisma.coupon.findUnique({ where: { id: couponId } });
-    if (!coupon) throw new NotFoundException('Coupon not found');
+    if (!coupon || coupon.isDeleted) throw new NotFoundException('Coupon not found');
     const saved = await this.prisma.savedCoupon.upsert({
       where: { userId_couponId: { userId, couponId } },
       update: {},
@@ -233,7 +234,7 @@ export class CouponsService {
 
   async findSavedCoupons(userId: string) {
     const saved = await this.prisma.savedCoupon.findMany({
-      where: { userId, coupon: { status: 'ACTIVE' } },
+      where: { userId, coupon: { status: 'ACTIVE', isDeleted: false } },
       select: {
         coupon: {
           select: {
@@ -331,7 +332,7 @@ export class CouponsService {
     if (!coupon) {
       throw new NotFoundException('Coupon not found');
     }
-    if (coupon.status !== 'ACTIVE') {
+    if (coupon.isDeleted || coupon.status !== 'ACTIVE') {
       throw new NotFoundException('Coupon not found');
     }
 
@@ -356,9 +357,9 @@ export class CouponsService {
   async trackView(couponId: string, userId?: string, source = 'APP') {
     const coupon = await this.prisma.coupon.findUnique({
       where: { id: couponId },
-      select: { id: true },
+      select: { id: true, isDeleted: true },
     });
-    if (!coupon) throw new NotFoundException('Coupon not found');
+    if (!coupon || coupon.isDeleted) throw new NotFoundException('Coupon not found');
 
     await this.prisma.couponViewEvent.create({
       data: {
@@ -464,10 +465,10 @@ export class CouponsService {
 
     await this.prisma.coupon.update({
       where: { id },
-      data: { status: 'ARCHIVED' },
+      data: { isDeleted: true, status: 'ARCHIVED' },
     });
 
-    return { id, deleted: true, softDeleted: true, status: 'ARCHIVED' };
+    return { id, deleted: true, softDeleted: true, isDeleted: true, status: 'ARCHIVED' };
   }
 
   async notifyNearbyUsers(id: string) {

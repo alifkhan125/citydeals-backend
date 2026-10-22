@@ -259,7 +259,7 @@ export class AuthService {
     const merchants = area
       ? await this.prisma.merchant.findMany({
           where: { areaId: area.id, status: 'ACTIVE', isDeleted: false },
-          include: { area: true, coupons: { where: { status: 'ACTIVE' } } },
+          include: { area: true, coupons: { where: { status: 'ACTIVE', isDeleted: false } } },
         })
       : [];
 

@@ -51,6 +51,7 @@ export class CategoriesService {
         categoryId: category.id,
         areaId: area?.id,
         status: 'ACTIVE',
+        isDeleted: false,
         area: { isDeleted: false },
         merchant: { isDeleted: false },
       },
