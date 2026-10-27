@@ -25,9 +25,11 @@ export class CategoriesService {
     return this.prisma.category.create({ data: { ...dto, slug } });
   }
 
-  findAll() {
+  findAll(user?: { role?: string } | null) {
     return this.prisma.category.findMany({
-      where: { isDeleted: false },
+      where: user?.role === 'ADMIN'
+        ? { isDeleted: false }
+        : { isDeleted: false, status: 'ACTIVE' },
       include: {
         _count: {
           select: { coupons: true, merchants: true },
