@@ -21,8 +21,8 @@ export class LocationService {
     const area = await this.areasService.resolveArea(dto.latitude, dto.longitude);
     const merchants = area
       ? await this.prisma.merchant.findMany({
-          where: { areaId: area.id, status: 'ACTIVE' },
-          include: { area: true, coupons: { where: { status: 'ACTIVE' } } },
+          where: { areaId: area.id, status: 'ACTIVE', isDeleted: false },
+          include: { area: true, coupons: { where: { status: 'ACTIVE', isDeleted: false } } },
         })
       : [];
 
@@ -31,7 +31,10 @@ export class LocationService {
         ...merchant,
         distanceMeters: haversineDistanceMeters(
           { latitude: dto.latitude, longitude: dto.longitude },
-          { latitude: Number(merchant.area.latitude), longitude: Number(merchant.area.longitude) },
+          {
+            latitude: Number(merchant.latitude ?? merchant.area.latitude),
+            longitude: Number(merchant.longitude ?? merchant.area.longitude),
+          },
         ),
       }))
       .filter(

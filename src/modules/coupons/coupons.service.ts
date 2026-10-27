@@ -37,7 +37,7 @@ export class CouponsService {
         categoryId: dto.categoryId,
         isWhitelisted: dto.isWhitelisted ?? false,
         shareSlug: randomUUID(),
-        status: dto.status ?? 'ACTIVE',
+        status: dto.status ?? 'ARCHIVED',
         startsAt: dto.startsAt ? new Date(dto.startsAt) : undefined,
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : undefined,
       },
@@ -52,7 +52,7 @@ export class CouponsService {
 
     if (!isAllArea) {
       if (!areaId && filter.areaSlug) {
-        const area = await this.prisma.area.findUnique({ where: { slug: filter.areaSlug } });
+        const area = await this.prisma.area.findFirst({ where: { slug: filter.areaSlug, isDeleted: false } });
         areaId = area?.id;
       }
     } else {
@@ -61,13 +61,18 @@ export class CouponsService {
 
     let categoryId = filter.categoryId;
     if (!categoryId && filter.categorySlug && filter.categorySlug.toLowerCase() !== 'all') {
-      const category = await this.prisma.category.findUnique({
-        where: { slug: filter.categorySlug.toLowerCase() },
+      const category = await this.prisma.category.findFirst({
+        where: { slug: filter.categorySlug.toLowerCase(), isDeleted: false },
       });
       categoryId = category?.id;
     }
 
-    const whereClause: any = {};
+    const whereClause: any = {
+      isDeleted: false,
+      area: { isDeleted: false },
+      merchant: { isDeleted: false },
+      OR: [{ categoryId: null }, { category: { isDeleted: false } }],
+    };
 
     if (user?.role === 'ADMIN' || user?.role === 'STAFF') {
       if (filter.status) {
@@ -157,8 +162,8 @@ export class CouponsService {
       const userLon = Number(userRecord.longitude);
       
       coupons = coupons.map(c => {
-        const mLat = Number(c.area.latitude);
-        const mLon = Number(c.area.longitude);
+        const mLat = Number(c.merchant?.latitude ?? c.area?.latitude);
+        const mLon = Number(c.merchant?.longitude ?? c.area?.longitude);
         const distanceMeters = (mLat && mLon) 
           ? haversineDistanceMeters({ latitude: userLat, longitude: userLon }, { latitude: mLat, longitude: mLon })
           : Infinity;
@@ -205,7 +210,7 @@ export class CouponsService {
       where: { shareSlug },
       include: { merchant: true, area: true, category: true },
     });
-    if (!coupon || coupon.status !== 'ACTIVE') {
+    if (!coupon || coupon.isDeleted || coupon.status !== 'ACTIVE') {
       throw new NotFoundException('Coupon not found');
     }
     return coupon;
@@ -213,7 +218,7 @@ export class CouponsService {
 
   async saveCoupon(userId: string, couponId: string) {
     const coupon = await this.prisma.coupon.findUnique({ where: { id: couponId } });
-    if (!coupon) throw new NotFoundException('Coupon not found');
+    if (!coupon || coupon.isDeleted) throw new NotFoundException('Coupon not found');
     const saved = await this.prisma.savedCoupon.upsert({
       where: { userId_couponId: { userId, couponId } },
       update: {},
@@ -229,9 +234,39 @@ export class CouponsService {
 
   async findSavedCoupons(userId: string) {
     const saved = await this.prisma.savedCoupon.findMany({
-      where: { userId },
-      include: { coupon: { include: { merchant: true, area: true, category: true } } },
+      where: { userId, coupon: { status: 'ACTIVE', isDeleted: false } },
+      select: {
+        coupon: {
+          select: {
+            id: true,
+            title: true,
+            description: true,
+            imageUrl: true,
+            couponCode: true,
+            couponLink: true,
+            shareSlug: true,
+            status: true,
+            startsAt: true,
+            expiresAt: true,
+            areaId: true,
+            merchantId: true,
+            categoryId: true,
+            isWhitelisted: true,
+            createdAt: true,
+            updatedAt: true,
+            category: {
+              select: {
+                id: true,
+                name: true,
+                slug: true,
+                iconUrl: true,
+              },
+            },
+          },
+        },
+      },
       orderBy: { createdAt: 'desc' },
+      take: 100,
     });
     return saved.filter((s) => s.coupon).map((s) => ({ ...s.coupon, isSaved: true }));
   }
@@ -297,6 +332,9 @@ export class CouponsService {
     if (!coupon) {
       throw new NotFoundException('Coupon not found');
     }
+    if (coupon.isDeleted || coupon.status !== 'ACTIVE') {
+      throw new NotFoundException('Coupon not found');
+    }
 
     let isSaved = false;
     let isRedeemed = false;
@@ -319,9 +357,9 @@ export class CouponsService {
   async trackView(couponId: string, userId?: string, source = 'APP') {
     const coupon = await this.prisma.coupon.findUnique({
       where: { id: couponId },
-      select: { id: true },
+      select: { id: true, isDeleted: true },
     });
-    if (!coupon) throw new NotFoundException('Coupon not found');
+    if (!coupon || coupon.isDeleted) throw new NotFoundException('Coupon not found');
 
     await this.prisma.couponViewEvent.create({
       data: {
@@ -336,6 +374,11 @@ export class CouponsService {
   }
 
   async redeemCoupon(userId: string, couponId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { status: true } });
+    if (!user) throw new NotFoundException('User not found');
+    if (user.status === 'BANNED') throw new ForbiddenException('This user is banned');
+    if (user.status === 'SUSPENDED') throw new ForbiddenException('This user is suspended');
+
     const coupon = await this.prisma.coupon.findUnique({
       where: { id: couponId },
       include: { merchant: true },
@@ -414,8 +457,18 @@ export class CouponsService {
   }
 
   async remove(id: string) {
-    await this.prisma.coupon.delete({ where: { id } });
-    return { id, deleted: true };
+    const coupon = await this.prisma.coupon.findUnique({
+      where: { id },
+      select: { id: true, status: true },
+    });
+    if (!coupon) throw new NotFoundException('Coupon not found');
+
+    await this.prisma.coupon.update({
+      where: { id },
+      data: { isDeleted: true, status: 'ARCHIVED' },
+    });
+
+    return { id, deleted: true, softDeleted: true, isDeleted: true, status: 'ARCHIVED' };
   }
 
   async notifyNearbyUsers(id: string) {
@@ -424,8 +477,11 @@ export class CouponsService {
       include: { merchant: true, area: true },
     });
     if (!coupon) throw new NotFoundException('Coupon not found');
-    if (!coupon.area.latitude || !coupon.area.longitude) {
-      throw new BadRequestException('Area location is missing');
+    const targetLat = coupon.merchant?.latitude || coupon.area?.latitude;
+    const targetLon = coupon.merchant?.longitude || coupon.area?.longitude;
+
+    if (!targetLat || !targetLon) {
+      throw new BadRequestException('Merchant or Area location coordinates are missing');
     }
 
     const allUsers = await this.prisma.user.findMany({
@@ -433,8 +489,8 @@ export class CouponsService {
       select: { id: true, fcmToken: true, latitude: true, longitude: true },
     });
 
-    const mLat = Number(coupon.area.latitude);
-    const mLon = Number(coupon.area.longitude);
+    const mLat = Number(targetLat);
+    const mLon = Number(targetLon);
 
     const nearbyUsers = allUsers.filter((user) => {
       if (!user.latitude || !user.longitude || !user.fcmToken) return false;
@@ -448,36 +504,36 @@ export class CouponsService {
     });
 
     if (nearbyUsers.length === 0) {
-      return { sent: 0, message: 'No nearby users found' };
+      return { sent: 0, message: 'No nearby users found with notifications enabled within 3km' };
     }
 
-    // We can use Expo/Firebase util directly, or `enqueueProximityNotification` which is private/public. 
-    // `enqueueProximityNotification` takes { userId, merchantId }. We want one broadcast.
-    
-    // Using NotificationsService.send won't filter by distance easily unless we create a custom SendNotificationDto.
-    // Instead we can send directly here using expo-push/firebase-push util if we want, or add a method to NotificationsService.
-    
-    // Actually, `enqueueProximityNotification` is public. But it's for 1 user.
-    // Let's just use the utils.
-    
     const { sendExpoPushMessages } = await import('../notifications/expo-push.util.js');
     const { sendFirebasePushMessages } = await import('../notifications/firebase-push.util.js');
+
+    const notificationTitle = 'Hot Deal Nearby!';
+    const notificationBody = `${coupon.title} is just around the corner at ${coupon.merchant?.name || 'a nearby store'}. Tap to grab it now!`;
+    const notificationData = {
+      sourceType: 'COUPON',
+      couponId: coupon.id,
+      title: notificationTitle,
+      body: notificationBody,
+    };
 
     await this.prisma.notification.createMany({
       data: nearbyUsers.map((user) => ({
         userId: user.id,
-        title: 'Hot Deal Nearby!',
-        body: `${coupon.title} is just around the corner at ${coupon.merchant.name}. Tap to grab it now!`,
-        data: { sourceType: 'COUPON', couponId: coupon.id },
+        title: notificationTitle,
+        body: notificationBody,
+        data: notificationData,
       })),
     });
 
-    const messages = nearbyUsers.map(u => ({
+    const messages = nearbyUsers.map((u) => ({
       to: u.fcmToken as string,
       token: u.fcmToken as string,
-      title: 'Hot Deal Nearby!',
-      body: `${coupon.title} is just around the corner at ${coupon.merchant.name}. Tap to grab it now!`,
-      data: { sourceType: 'COUPON', couponId: coupon.id },
+      title: notificationTitle,
+      body: notificationBody,
+      data: notificationData,
       channelId: 'deals',
     }));
 
@@ -487,6 +543,6 @@ export class CouponsService {
     if (fcmMessages.length > 0) await sendFirebasePushMessages(fcmMessages);
     if (expoMessages.length > 0) await sendExpoPushMessages(expoMessages);
 
-    return { sent: nearbyUsers.length, message: `Notification sent to ${nearbyUsers.length} users within 3km` };
+    return { sent: nearbyUsers.length, message: `Notification sent to ${nearbyUsers.length} user(s) within 3km` };
   }
 }

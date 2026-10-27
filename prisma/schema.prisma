@@ -13,7 +13,7 @@ enum Role {
 }
 
 enum CouponStatus {
-  DRAFT
+  ARCHIVED
   ACTIVE
   EXPIRED
   SUSPENDED
@@ -80,6 +80,7 @@ model Area {
   latitude    Decimal  @db.Decimal(9, 6)
   longitude   Decimal  @db.Decimal(9, 6)
   radiusMeters Int     @default(10000)
+  isDeleted   Boolean  @default(false)
   qrCodeUrl   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -98,6 +99,7 @@ model Category {
   iconUrl   String?
   description String?
   status    ContentStatus @default(ACTIVE)
+  isDeleted Boolean @default(false)
   sortOrder Int      @default(0)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -126,6 +128,7 @@ model Merchant {
   tiktokUrl   String?
   radiusMeters Int     @default(3000)
   status      ContentStatus @default(ACTIVE)
+  isDeleted   Boolean  @default(false)
   latitude    Decimal  @db.Decimal(9, 6)
   longitude   Decimal  @db.Decimal(9, 6)
   createdAt   DateTime @default(now())
@@ -153,7 +156,8 @@ model Coupon {
   discussion  String?
   terms       String?
   shareSlug   String       @unique
-  status      CouponStatus @default(DRAFT)
+  status      CouponStatus @default(ARCHIVED)
+  isDeleted   Boolean      @default(false)
   startsAt    DateTime?
   expiresAt   DateTime?
   areaId      String
@@ -191,6 +195,7 @@ model StaffAccount {
   email     String   @unique
   roleKey   String
   status    UserStatus @default(ACTIVE)
+  isDeleted Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

@@ -9,12 +9,12 @@ export class MerchantsService {
   async create(user: { id: string; role: string; areaId?: string | null }, dto: CreateMerchantDto) {
     let areaId = dto.areaId || user.areaId;
     if (!areaId) {
-      const defaultArea = await this.prisma.area.findFirst({ orderBy: { createdAt: 'asc' } });
+      const defaultArea = await this.prisma.area.findFirst({ where: { isDeleted: false }, orderBy: { createdAt: 'asc' } });
       areaId = defaultArea?.id;
     }
     if (!areaId) throw new BadRequestException('Area is required. Please create an area first.');
 
-    const area = await this.prisma.area.findUnique({ where: { id: areaId } });
+    const area = await this.prisma.area.findFirst({ where: { id: areaId, isDeleted: false } });
     if (!area) throw new NotFoundException('Area not found');
 
     let categoryId = dto.categoryId;
@@ -50,7 +50,11 @@ export class MerchantsService {
   findForArea(user: { role: string; areaId?: string | null }, areaId?: string) {
     const scopedAreaId = areaId || user.areaId;
     return this.prisma.merchant.findMany({
-      where: user.role === 'ADMIN' ? (areaId ? { areaId } : {}) : (scopedAreaId ? { areaId: scopedAreaId } : {}),
+      where: {
+        ...(user.role === 'ADMIN' ? (areaId ? { areaId } : {}) : (scopedAreaId ? { areaId: scopedAreaId } : {})),
+        area: { isDeleted: false },
+        isDeleted: false,
+      },
       include: { area: true, category: true },
       orderBy: { name: 'asc' },
     });
@@ -62,7 +66,7 @@ export class MerchantsService {
       data.categoryId = null;
     }
     if (data.areaId) {
-      const area = await this.prisma.area.findUnique({ where: { id: data.areaId } });
+      const area = await this.prisma.area.findFirst({ where: { id: data.areaId, isDeleted: false } });
       if (!area) throw new NotFoundException('Area not found');
       data.latitude = Number(area.latitude);
       data.longitude = Number(area.longitude);
@@ -71,6 +75,8 @@ export class MerchantsService {
       delete data.latitude;
       delete data.longitude;
     }
+    const merchant = await this.prisma.merchant.findFirst({ where: { id, isDeleted: false } });
+    if (!merchant) throw new NotFoundException('Merchant not found');
     return this.prisma.merchant.update({
       where: { id },
       data,
@@ -79,7 +85,9 @@ export class MerchantsService {
   }
 
   async remove(id: string) {
-    await this.prisma.merchant.delete({ where: { id } });
-    return { id, deleted: true };
+    const merchant = await this.prisma.merchant.findFirst({ where: { id, isDeleted: false } });
+    if (!merchant) throw new NotFoundException('Merchant not found');
+    await this.prisma.merchant.update({ where: { id }, data: { isDeleted: true } });
+    return { id, deleted: true, softDeleted: true };
   }
 }

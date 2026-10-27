@@ -7,6 +7,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { ListNotificationsDto } from './dto/list-notifications.dto.js';
 import { SendNotificationDto } from './dto/send-notification.dto.js';
+import { UpdateBirthdaySettingsDto } from './dto/birthday-settings.dto.js';
 import { NotificationsService } from './notifications.service.js';
 
 @ApiTags('Notifications')
@@ -38,5 +39,26 @@ export class NotificationsController {
   @Post('send')
   send(@Body() dto: SendNotificationDto) {
     return this.notificationsService.send(dto);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'ADVERTISER')
+  @Get('birthday-settings')
+  getBirthdaySettings() {
+    return this.notificationsService.getBirthdaySettings();
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'ADVERTISER')
+  @Post('birthday-settings')
+  updateBirthdaySettings(@Body() dto: UpdateBirthdaySettingsDto) {
+    return this.notificationsService.updateBirthdaySettings(dto);
+  }
+
+  @UseGuards(RolesGuard)
+  @Roles('ADMIN', 'ADVERTISER')
+  @Post('trigger-birthday-checks')
+  triggerBirthdayChecks() {
+    return this.notificationsService.checkAndSendBirthdayNotifications();
   }
 }

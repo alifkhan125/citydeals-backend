@@ -147,6 +147,8 @@ export class AuthService {
     if (!user || !(await bcrypt.compare(dto.password, user.passwordHash))) {
       throw new UnauthorizedException('Invalid credentials');
     }
+    if (user.status === 'BANNED') throw new ForbiddenException('This user is banned');
+    if (user.status === 'SUSPENDED') throw new ForbiddenException('This user is suspended');
 
     // If ADMIN role, look up their StaffAccount to get the roleKey for permission checks
     let staffRoleKey: string | undefined;
@@ -256,8 +258,8 @@ export class AuthService {
     // Proximity logic
     const merchants = area
       ? await this.prisma.merchant.findMany({
-          where: { areaId: area.id, status: 'ACTIVE' },
-          include: { area: true, coupons: { where: { status: 'ACTIVE' } } },
+          where: { areaId: area.id, status: 'ACTIVE', isDeleted: false },
+          include: { area: true, coupons: { where: { status: 'ACTIVE', isDeleted: false } } },
         })
       : [];
 
@@ -267,7 +269,10 @@ export class AuthService {
         ...merchant,
         distanceMeters: haversineDistanceMeters(
           { latitude: dto.latitude, longitude: dto.longitude },
-            { latitude: Number(merchant.area.latitude), longitude: Number(merchant.area.longitude) },
+            {
+              latitude: Number(merchant.latitude),
+              longitude: Number(merchant.longitude),
+            },
         ),
       }))
       .filter(

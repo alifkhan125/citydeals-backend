@@ -7,6 +7,7 @@
   "license": "UNLICENSED",
   "type": "module",
   "scripts": {
+    "prebuild": "prisma generate",
     "build": "nest build",
     "deploy": "nest deploy",
     "db:dev": "docker compose up -d postgres redis",
@@ -14,7 +15,9 @@
     "db:studio": "prisma studio",
     "seed": "tsx prisma/seed.ts",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "prestart": "prisma generate",
     "start": "nest start",
+    "prestart:dev": "prisma generate",
     "start:dev": "nest start --watch",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",

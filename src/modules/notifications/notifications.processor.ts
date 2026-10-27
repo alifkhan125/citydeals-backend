@@ -7,7 +7,7 @@ import { SendNotificationDto } from './dto/send-notification.dto.js';
 import { sendExpoPushMessages } from './expo-push.util.js';
 import { sendFirebasePushMessages } from './firebase-push.util.js';
 
-const COOLDOWN_MS = 60 * 1000; // 1 minute for testing
+const COOLDOWN_MS = 12 * 60 * 60 * 1000; // 12 hours between proximity alerts
 
 @Injectable()
 @Processor(PROXIMITY_QUEUE)
@@ -51,22 +51,22 @@ export class NotificationsProcessor extends WorkerHost {
     const token = user.fcmToken ?? '';
     const push = token.startsWith('ExpoPushToken[') || token.startsWith('ExponentPushToken[')
       ? await sendExpoPushMessages([
-          {
-            to: token,
-            title: job.data.title,
-            body: job.data.body,
-            data: { sourceType: 'MERCHANT', merchantId },
-            channelId: 'deals',
-          },
-        ])
+        {
+          to: token,
+          title: job.data.title,
+          body: job.data.body,
+          data: { sourceType: 'MERCHANT', merchantId },
+          channelId: 'deals',
+        },
+      ])
       : await sendFirebasePushMessages([
-          {
-            token,
-            title: job.data.title,
-            body: job.data.body,
-            data: { sourceType: 'MERCHANT', merchantId },
-          },
-        ]);
+        {
+          token,
+          title: job.data.title,
+          body: job.data.body,
+          data: { sourceType: 'MERCHANT', merchantId },
+        },
+      ]);
     return { sent: true, push };
   }
 
@@ -84,7 +84,7 @@ export class NotificationsProcessor extends WorkerHost {
     const cooldowns = await this.prisma.notificationCooldown.findMany({
       where: { userId, merchantId: { in: merchantIds } },
     });
-    
+
     const now = Date.now();
     const cooledDownMerchantIds = new Set(
       cooldowns.filter((c: any) => now - c.lastSentAt.getTime() < COOLDOWN_MS).map((c: any) => c.merchantId)
@@ -121,12 +121,12 @@ export class NotificationsProcessor extends WorkerHost {
 
     const push = token.startsWith('ExpoPushToken[') || token.startsWith('ExponentPushToken[')
       ? await sendExpoPushMessages([
-          { to: token, title, body, data: { sourceType: 'NEARBY_DEALS', grouped: true }, channelId: 'deals' },
-        ])
+        { to: token, title, body, data: { sourceType: 'NEARBY_DEALS', grouped: true }, channelId: 'deals' },
+      ])
       : await sendFirebasePushMessages([
-          { token, title, body, data: { sourceType: 'NEARBY_DEALS', grouped: true } },
-        ]);
-        
+        { token, title, body, data: { sourceType: 'NEARBY_DEALS', grouped: true } },
+      ]);
+
     return { sent: true, push };
   }
 }

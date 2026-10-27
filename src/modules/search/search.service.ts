@@ -10,19 +10,22 @@ export class SearchService {
     const page = Math.max(Number(query.page ?? 1), 1);
     const limit = Math.min(Math.max(Number(query.limit ?? 20), 1), 50);
     const area = query.areaSlug
-      ? await this.prisma.area.findUnique({ where: { slug: query.areaSlug } })
+      ? await this.prisma.area.findFirst({ where: { slug: query.areaSlug, isDeleted: false } })
       : null;
     const areaId = user?.role === 'ADMIN' ? area?.id ?? user.areaId : area?.id ?? user?.areaId;
     if (!areaId) throw new ForbiddenException('Area scope is required');
 
     const text = query.q?.trim();
     const category = query.categorySlug
-      ? await this.prisma.category.findUnique({ where: { slug: query.categorySlug } })
+      ? await this.prisma.category.findFirst({ where: { slug: query.categorySlug, isDeleted: false } })
       : null;
 
     const where = {
       areaId,
       status: 'ACTIVE' as const,
+      isDeleted: false,
+      merchant: { isDeleted: false },
+      area: { isDeleted: false },
       categoryId: category?.id,
       OR: text
         ? [
