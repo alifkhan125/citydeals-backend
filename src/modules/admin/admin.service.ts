@@ -151,6 +151,80 @@ export class AdminService {
     });
   }
 
+  async couponReport(user: { role: string; areaId?: string | null }, id: string) {
+    const coupon = await this.prisma.coupon.findFirst({
+      where: {
+        id,
+        isDeleted: false,
+        ...(user.role === 'ADVERTISER' && user.areaId ? { areaId: user.areaId } : {}),
+      },
+      include: {
+        merchant: true,
+        area: true,
+        category: true,
+        _count: { select: { savedBy: true, redemptions: true, shareEvents: true, viewEvents: true } },
+      },
+    });
+    if (!coupon) throw new NotFoundException('Coupon not found');
+
+    const [redemptions, shareEvents, uniqueViewers] = await Promise.all([
+      this.prisma.couponRedemption.findMany({
+        where: { couponId: id },
+        select: {
+          id: true,
+          createdAt: true,
+          user: { select: { fullName: true, email: true, phoneNumber: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 250,
+      }),
+      this.prisma.couponShareEvent.findMany({
+        where: { couponId: id },
+        select: { channel: true, eventType: true, createdAt: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+      this.prisma.couponViewEvent.groupBy({
+        by: ['userId'],
+        where: { couponId: id, userId: { not: null } },
+      }),
+    ]);
+
+    const channels = new Map<string, { channel: string; shares: number; opens: number }>();
+    for (const event of shareEvents) {
+      const channel = event.channel || 'SYSTEM';
+      const row = channels.get(channel) || { channel, shares: 0, opens: 0 };
+      if (event.eventType === 'OPEN') row.opens += 1;
+      else row.shares += 1;
+      channels.set(channel, row);
+    }
+    const shareBreakdown = Array.from(channels.values()).map((row) => ({
+      ...row,
+      openRate: row.shares ? row.opens / row.shares : 0,
+    }));
+    const totalShares = shareBreakdown.reduce((sum, row) => sum + row.shares, 0);
+    const totalOpens = shareBreakdown.reduce((sum, row) => sum + row.opens, 0);
+
+    return {
+      coupon: { ...coupon, _count: undefined },
+      metrics: {
+        views: coupon._count.viewEvents,
+        uniqueViewers: uniqueViewers.length,
+        saves: coupon._count.savedBy,
+        redemptions: coupon._count.redemptions,
+        shares: totalShares,
+        shareOpens: totalOpens,
+        conversionRate: coupon._count.viewEvents ? coupon._count.redemptions / coupon._count.viewEvents : 0,
+        saveRate: coupon._count.viewEvents ? coupon._count.savedBy / coupon._count.viewEvents : 0,
+        remainingRedemptions: coupon.redemptionLimit == null
+          ? null
+          : Math.max(0, coupon.redemptionLimit - coupon._count.redemptions),
+      },
+      shareBreakdown,
+      redemptions,
+      generatedAt: new Date(),
+    };
+  }
+
   async updateUserStatus(id: string, dto: UpdateUserStatusDto) {
     const target = await this.prisma.user.findUnique({ where: { id }, select: { role: true } });
     if (!target) throw new NotFoundException('User not found');

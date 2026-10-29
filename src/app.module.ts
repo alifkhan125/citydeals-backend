@@ -25,6 +25,7 @@ import { SearchModule } from './modules/search/search.module.js';
 import { ShareModule } from './modules/share/share.module.js';
 import { SupportModule } from './modules/support/support.module.js';
 import { UsersModule } from './modules/users/users.module.js';
+import { SettingsModule } from './modules/settings/settings.module.js';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { UsersModule } from './modules/users/users.module.js';
     ShareModule,
     LocationModule,
     NotificationsModule,
+    SettingsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

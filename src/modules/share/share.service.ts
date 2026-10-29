@@ -1,13 +1,28 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service.js';
+import { SettingsService } from '../settings/settings.service.js';
 
 @Injectable()
 export class ShareService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
+    private readonly settingsService: SettingsService,
   ) {}
+
+  async getCouponOpenPage(shareSlug: string) {
+    const coupon = await this.prisma.coupon.findUnique({
+      where: { shareSlug },
+      select: { title: true, description: true, imageUrl: true, status: true, isDeleted: true },
+    });
+    if (!coupon || coupon.isDeleted || coupon.status !== 'ACTIVE') {
+      throw new NotFoundException('Coupon not found');
+    }
+
+    const stores = await this.settingsService.getStoreLinks();
+    return { coupon, stores };
+  }
 
   async getCouponShareData(shareSlug: string) {
     const coupon = await this.prisma.coupon.findUnique({

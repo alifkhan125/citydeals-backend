@@ -38,52 +38,52 @@ enum RedemptionFrequency {
 }
 
 model User {
-  id                 String   @id @default(uuid())
-  fullName           String?
-  email              String   @unique
-  phoneNumber        String?
-  profilePictureUrl  String?
-  dateOfBirth        DateTime?
-  notificationsPaused Boolean @default(false)
-  notificationRadiusMeters Int @default(2000)
-  passwordHash       String
-  role               Role     @default(USER)
-  status             UserStatus @default(ACTIVE)
-  areaId             String?
-  preferredLanguage  String   @default("en")
-  acceptedTerms      Boolean  @default(false)
-  onboardingCompleted Boolean @default(false)
-  refreshTokenHash   String?
-  resetPasswordOtp   String?
-  resetPasswordExpiresAt DateTime?
-  latitude           Decimal? @db.Decimal(9, 6)
-  longitude          Decimal? @db.Decimal(9, 6)
-  fcmToken           String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  id                       String     @id @default(uuid())
+  fullName                 String?
+  email                    String     @unique
+  phoneNumber              String?
+  profilePictureUrl        String?
+  dateOfBirth              DateTime?
+  notificationsPaused      Boolean    @default(false)
+  notificationRadiusMeters Int        @default(2000)
+  passwordHash             String
+  role                     Role       @default(USER)
+  status                   UserStatus @default(ACTIVE)
+  areaId                   String?
+  preferredLanguage        String     @default("en")
+  acceptedTerms            Boolean    @default(false)
+  onboardingCompleted      Boolean    @default(false)
+  refreshTokenHash         String?
+  resetPasswordOtp         String?
+  resetPasswordExpiresAt   DateTime?
+  latitude                 Decimal?   @db.Decimal(9, 6)
+  longitude                Decimal?   @db.Decimal(9, 6)
+  fcmToken                 String?
+  createdAt                DateTime   @default(now())
+  updatedAt                DateTime   @updatedAt
 
-  area                Area?                  @relation(fields: [areaId], references: [id])
-  merchants           Merchant[]
-  notificationEvents  NotificationCooldown[]
-  notifications       Notification[]
-  savedCoupons        SavedCoupon[]
-  couponRedemptions   CouponRedemption[]
-  supportTickets      SupportTicket[]
+  area               Area?                  @relation(fields: [areaId], references: [id])
+  merchants          Merchant[]
+  notificationEvents NotificationCooldown[]
+  notifications      Notification[]
+  savedCoupons       SavedCoupon[]
+  couponRedemptions  CouponRedemption[]
+  supportTickets     SupportTicket[]
 }
 
 model Area {
-  id          String   @id @default(uuid())
-  name        String
-  slug        String   @unique
-  city        String
-  state       String
-  latitude    Decimal  @db.Decimal(9, 6)
-  longitude   Decimal  @db.Decimal(9, 6)
-  radiusMeters Int     @default(10000)
-  isDeleted   Boolean  @default(false)
-  qrCodeUrl   String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id           String   @id @default(uuid())
+  name         String
+  slug         String   @unique
+  city         String
+  state        String
+  latitude     Decimal  @db.Decimal(9, 6)
+  longitude    Decimal  @db.Decimal(9, 6)
+  radiusMeters Int      @default(10000)
+  isDeleted    Boolean  @default(false)
+  qrCodeUrl    String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   users     User[]
   merchants Merchant[]
@@ -93,16 +93,16 @@ model Area {
 }
 
 model Category {
-  id        String   @id @default(uuid())
-  name      String
-  slug      String   @unique
-  iconUrl   String?
+  id          String        @id @default(uuid())
+  name        String
+  slug        String        @unique
+  iconUrl     String?
   description String?
-  status    ContentStatus @default(ACTIVE)
-  isDeleted Boolean @default(false)
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  status      ContentStatus @default(ACTIVE)
+  isDeleted   Boolean       @default(false)
+  sortOrder   Int           @default(0)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
   coupons   Coupon[]
   merchants Merchant[]
@@ -111,28 +111,28 @@ model Category {
 }
 
 model Merchant {
-  id          String   @id @default(uuid())
-  name        String
-  description String?
-  titleText   String?
-  logoUrl     String?
-  categoryId  String?
-  areaId      String
-  ownerId     String?
-  address     String
-  phone       String?
-  email       String?
-  websiteUrl  String?
+  id           String        @id @default(uuid())
+  name         String
+  description  String?
+  titleText    String?
+  logoUrl      String?
+  categoryId   String?
+  areaId       String
+  ownerId      String?
+  address      String
+  phone        String?
+  email        String?
+  websiteUrl   String?
   instagramUrl String?
-  facebookUrl String?
-  tiktokUrl   String?
-  radiusMeters Int     @default(3000)
-  status      ContentStatus @default(ACTIVE)
-  isDeleted   Boolean  @default(false)
-  latitude    Decimal  @db.Decimal(9, 6)
-  longitude   Decimal  @db.Decimal(9, 6)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  facebookUrl  String?
+  tiktokUrl    String?
+  radiusMeters Int           @default(3000)
+  status       ContentStatus @default(ACTIVE)
+  isDeleted    Boolean       @default(false)
+  latitude     Decimal       @db.Decimal(9, 6)
+  longitude    Decimal       @db.Decimal(9, 6)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
   area                  Area                   @relation(fields: [areaId], references: [id])
   owner                 User?                  @relation(fields: [ownerId], references: [id])
@@ -145,35 +145,35 @@ model Merchant {
 }
 
 model Coupon {
-  id          String       @id @default(uuid())
-  title       String
-  description String
-  imageUrl    String?
-  couponCode  String?
-  couponLink  String?
-  redemptionLimit Int?
+  id                  String              @id @default(uuid())
+  title               String
+  description         String
+  imageUrl            String?
+  couponCode          String?
+  couponLink          String?
+  redemptionLimit     Int?
   redemptionFrequency RedemptionFrequency @default(ONE_TIME)
-  discussion  String?
-  terms       String?
-  shareSlug   String       @unique
-  status      CouponStatus @default(ARCHIVED)
-  isDeleted   Boolean      @default(false)
-  startsAt    DateTime?
-  expiresAt   DateTime?
-  areaId      String
-  merchantId  String
-  categoryId  String?
-  isWhitelisted Boolean @default(false)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  discussion          String?
+  terms               String?
+  shareSlug           String              @unique
+  status              CouponStatus        @default(ARCHIVED)
+  isDeleted           Boolean             @default(false)
+  startsAt            DateTime?
+  expiresAt           DateTime?
+  areaId              String
+  merchantId          String
+  categoryId          String?
+  isWhitelisted       Boolean             @default(false)
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
 
-  area     Area     @relation(fields: [areaId], references: [id])
-  merchant Merchant @relation(fields: [merchantId], references: [id])
-  category Category? @relation(fields: [categoryId], references: [id])
-  savedBy  SavedCoupon[]
+  area        Area               @relation(fields: [areaId], references: [id])
+  merchant    Merchant           @relation(fields: [merchantId], references: [id])
+  category    Category?          @relation(fields: [categoryId], references: [id])
+  savedBy     SavedCoupon[]
   redemptions CouponRedemption[]
   shareEvents CouponShareEvent[]
-  viewEvents CouponViewEvent[]
+  viewEvents  CouponViewEvent[]
 
   @@index([areaId, status])
   @@index([categoryId])
@@ -190,14 +190,14 @@ model StaffRole {
 }
 
 model StaffAccount {
-  id        String   @id @default(uuid())
+  id        String     @id @default(uuid())
   fullName  String
-  email     String   @unique
+  email     String     @unique
   roleKey   String
   status    UserStatus @default(ACTIVE)
-  isDeleted Boolean @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  isDeleted Boolean    @default(false)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
 }
 
 model CouponRedemption {
@@ -224,7 +224,6 @@ model SupportTicket {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-
   user User? @relation(fields: [userId], references: [id])
 
   @@index([userId])
@@ -237,6 +236,12 @@ model LegalDocument {
   title     String
   content   String
   version   String   @default("1.0")
+  updatedAt DateTime @updatedAt
+}
+
+model AppSetting {
+  key       String   @id
+  value     String
   updatedAt DateTime @updatedAt
 }
 
