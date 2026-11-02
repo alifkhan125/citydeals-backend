@@ -29,13 +29,31 @@ export class AdminDashboardService {
   }
 
   async dailyRedemptions() {
-    const rows = await this.prisma.couponRedemption.groupBy({
-      by: ['createdAt'],
-      _count: { id: true },
-      orderBy: { createdAt: 'asc' },
-      take: 100,
+    const now = new Date();
+    const startOfDay = new Date(now);
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const redemptions = await this.prisma.couponRedemption.findMany({
+      where: {
+        createdAt: {
+          gte: startOfDay,
+          lte: now,
+        },
+      },
+      select: { createdAt: true },
     });
-    return rows.map((row) => ({ time: row.createdAt, count: row._count.id }));
+
+    const hourlyCounts = Array.from({ length: 24 }, (_, hour) => ({
+      time: new Date(startOfDay.getTime() + hour * 60 * 60 * 1000),
+      count: 0,
+    }));
+
+    for (const redemption of redemptions) {
+      const hour = redemption.createdAt.getHours();
+      hourlyCounts[hour].count += 1;
+    }
+
+    return hourlyCounts;
   }
 
   async redemptionsByArea() {
