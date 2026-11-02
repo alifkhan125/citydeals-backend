@@ -298,6 +298,47 @@ export class NotificationsService implements OnModuleInit {
   }
 
   async send(dto: SendNotificationDto) {
+    if (dto.scheduledAt) {
+      const scheduledTime = new Date(dto.scheduledAt);
+      if (!Number.isNaN(scheduledTime.getTime()) && scheduledTime.getTime() > Date.now()) {
+        await this.queue.add('send-scheduled-notification', { dto }, {
+          delay: scheduledTime.getTime() - Date.now(),
+          attempts: 3,
+          backoff: { type: 'exponential', delay: 5000 },
+          removeOnComplete: true,
+          removeOnFail: 100,
+        });
+        return {
+          scheduled: true,
+          scheduledAt: scheduledTime.toISOString(),
+          repeat: dto.repeat ?? 'NONE',
+        };
+      }
+    }
+
+    return this.sendNow(dto);
+  }
+
+  async processScheduledNotification(dto: SendNotificationDto) {
+    const result = await this.sendNow({ ...dto, scheduledAt: undefined, repeat: 'NONE' });
+    const repeat = dto.repeat ?? 'NONE';
+    if (repeat !== 'NONE') {
+      const nextRun = new Date();
+      nextRun.setDate(nextRun.getDate() + (repeat === 'WEEKLY' ? 7 : 1));
+      await this.queue.add('send-scheduled-notification', {
+        dto: { ...dto, scheduledAt: nextRun.toISOString() },
+      }, {
+        delay: Math.max(0, nextRun.getTime() - Date.now()),
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5000 },
+        removeOnComplete: true,
+        removeOnFail: 100,
+      });
+    }
+    return { ...result, repeat, nextScheduledAt: repeat === 'NONE' ? null : new Date(Date.now() + (repeat === 'WEEKLY' ? 7 : 1) * 24 * 60 * 60 * 1000).toISOString() };
+  }
+
+  private async sendNow(dto: SendNotificationDto) {
     const users = await this.resolveRecipients(dto);
     const notifications = await this.prisma.notification.createMany({
       data: users.map((user) => ({
@@ -321,7 +362,7 @@ export class NotificationsService implements OnModuleInit {
     });
 
     const push = await this.sendPushNotifications(users, dto);
-    return { recipients: users.length, created: notifications.count, push };
+    return { scheduled: false, recipients: users.length, created: notifications.count, push };
   }
 
   private async resolveRecipients(dto: SendNotificationDto) {

@@ -61,16 +61,33 @@ export class SettingsService {
     const cooldownMinutes = Math.max(0, values[REDEMPTION_COOLDOWN_MINUTES_KEY] || 0);
     const dailyLimit = Math.max(0, values[DAILY_REDEMPTION_LIMIT_KEY] || 0);
 
+    const unit = cooldownMinutes > 0 && cooldownMinutes % (30 * 24 * 60) === 0
+      ? 'MONTHLY' as const
+      : cooldownMinutes > 0 && cooldownMinutes % (7 * 24 * 60) === 0
+        ? 'WEEKLY' as const
+        : 'DAILY' as const;
+    const unitMinutes = unit === 'MONTHLY'
+      ? 30 * 24 * 60
+      : unit === 'WEEKLY'
+        ? 7 * 24 * 60
+          : 24 * 60;
+
     return {
       ...DEFAULT_REDEMPTION_RULES,
-      cooldownValue: cooldownMinutes % (24 * 60) === 0 ? cooldownMinutes / (24 * 60) : cooldownMinutes / 60,
-      cooldownUnit: cooldownMinutes > 0 && cooldownMinutes % (24 * 60) === 0 ? 'DAYS' as const : 'HOURS' as const,
+      cooldownValue: cooldownMinutes > 0 ? Math.max(1, Math.round(cooldownMinutes / unitMinutes)) : 0,
+      cooldownUnit: unit,
       dailyLimit,
     };
   }
 
   async updateRedemptionRules(dto: UpdateRedemptionRulesDto) {
-    const cooldownMinutes = dto.cooldownValue * (dto.cooldownUnit === 'DAYS' ? 24 * 60 : 60);
+    const cooldownMinutes = dto.cooldownValue * (
+      dto.cooldownUnit === 'MONTHLY'
+        ? 30 * 24 * 60
+        : dto.cooldownUnit === 'WEEKLY'
+          ? 7 * 24 * 60
+            : 24 * 60
+    );
     await this.prisma.$transaction([
       this.prisma.appSetting.upsert({
         where: { key: REDEMPTION_COOLDOWN_MINUTES_KEY },

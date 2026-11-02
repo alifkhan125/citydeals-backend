@@ -413,8 +413,13 @@ export class CouponsService {
     // When it is disabled, the existing per-coupon frequency rules continue
     // to apply unchanged.
     if (redemptionRules.cooldownValue > 0) {
-      const cooldownMinutes = redemptionRules.cooldownValue *
-        (redemptionRules.cooldownUnit === 'DAYS' ? 24 * 60 : 60);
+      const cooldownMinutes = redemptionRules.cooldownValue * (
+        redemptionRules.cooldownUnit === 'MONTHLY'
+          ? 30 * 24 * 60
+          : redemptionRules.cooldownUnit === 'WEEKLY'
+            ? 7 * 24 * 60
+              : 24 * 60
+      );
       const latestRedemption = await this.prisma.couponRedemption.findFirst({
         where: { userId, couponId },
         orderBy: { createdAt: 'desc' },

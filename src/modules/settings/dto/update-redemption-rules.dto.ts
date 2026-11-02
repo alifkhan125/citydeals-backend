@@ -5,8 +5,8 @@ export class UpdateRedemptionRulesDto {
   @Min(0)
   cooldownValue!: number;
 
-  @IsIn(['HOURS', 'DAYS'])
-  cooldownUnit!: 'HOURS' | 'DAYS';
+  @IsIn(['DAILY', 'WEEKLY', 'MONTHLY'])
+  cooldownUnit!: 'DAILY' | 'WEEKLY' | 'MONTHLY';
 
   @IsInt()
   @Min(0)
