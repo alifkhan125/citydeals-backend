@@ -4,7 +4,6 @@ import { PrismaService } from '../../database/prisma.service.js';
 import { UpdateStoreLinksDto } from './dto/update-store-links.dto.js';
 import { UpdateRedemptionRulesDto } from './dto/update-redemption-rules.dto.js';
 import {
-  DAILY_REDEMPTION_LIMIT_KEY,
   DEFAULT_REDEMPTION_RULES,
   REDEMPTION_COOLDOWN_MINUTES_KEY,
 } from './redemption-rules.constants.js';
@@ -55,11 +54,10 @@ export class SettingsService {
 
   async getRedemptionRules() {
     const rows = await this.prisma.appSetting.findMany({
-      where: { key: { in: [REDEMPTION_COOLDOWN_MINUTES_KEY, DAILY_REDEMPTION_LIMIT_KEY] } },
+      where: { key: REDEMPTION_COOLDOWN_MINUTES_KEY },
     });
     const values = Object.fromEntries(rows.map((row) => [row.key, Number(row.value)]));
     const cooldownMinutes = Math.max(0, values[REDEMPTION_COOLDOWN_MINUTES_KEY] || 0);
-    const dailyLimit = Math.max(0, values[DAILY_REDEMPTION_LIMIT_KEY] || 0);
 
     const unit = cooldownMinutes > 0 && cooldownMinutes % (30 * 24 * 60) === 0
       ? 'MONTHLY' as const
@@ -76,7 +74,6 @@ export class SettingsService {
       ...DEFAULT_REDEMPTION_RULES,
       cooldownValue: cooldownMinutes > 0 ? Math.max(1, Math.round(cooldownMinutes / unitMinutes)) : 0,
       cooldownUnit: unit,
-      dailyLimit,
     };
   }
 
@@ -93,11 +90,6 @@ export class SettingsService {
         where: { key: REDEMPTION_COOLDOWN_MINUTES_KEY },
         create: { key: REDEMPTION_COOLDOWN_MINUTES_KEY, value: String(cooldownMinutes) },
         update: { value: String(cooldownMinutes) },
-      }),
-      this.prisma.appSetting.upsert({
-        where: { key: DAILY_REDEMPTION_LIMIT_KEY },
-        create: { key: DAILY_REDEMPTION_LIMIT_KEY, value: String(dto.dailyLimit) },
-        update: { value: String(dto.dailyLimit) },
       }),
     ]);
     return this.getRedemptionRules();

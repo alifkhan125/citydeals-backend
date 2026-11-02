@@ -340,19 +340,44 @@ export class CouponsService {
 
     let isSaved = false;
     let isRedeemed = false;
+    let redeemedAt: Date | null = null;
+    let redemptionAvailableAt: Date | null = null;
     if (userId) {
       const [saved, redeemed] = await Promise.all([
         this.prisma.savedCoupon.findFirst({ where: { userId, couponId: id } }),
-        this.prisma.couponRedemption.findFirst({ where: { userId, couponId: id } }),
+        this.prisma.couponRedemption.findFirst({ where: { userId, couponId: id }, orderBy: { createdAt: 'desc' } }),
       ]);
       isSaved = !!saved;
       isRedeemed = !!redeemed;
+      redeemedAt = redeemed?.createdAt ?? null;
+
+      if (redeemed) {
+        const rules = await this.settingsService.getRedemptionRules();
+        if (rules.cooldownValue > 0) {
+          const cooldownMinutes = rules.cooldownValue * (
+            rules.cooldownUnit === 'MONTHLY'
+              ? 30 * 24 * 60
+              : rules.cooldownUnit === 'WEEKLY'
+                ? 7 * 24 * 60
+                : 24 * 60
+          );
+          redemptionAvailableAt = new Date(redeemed.createdAt.getTime() + cooldownMinutes * 60 * 1000);
+        } else if (coupon.redemptionFrequency === 'DAILY') {
+          redemptionAvailableAt = new Date(redeemed.createdAt);
+          redemptionAvailableAt.setDate(redemptionAvailableAt.getDate() + 1);
+          redemptionAvailableAt.setHours(0, 0, 0, 0);
+        } else if (coupon.redemptionFrequency === 'WEEKLY') {
+          redemptionAvailableAt = new Date(redeemed.createdAt.getTime() + 7 * 24 * 60 * 60 * 1000);
+        }
+      }
     }
 
     return {
       ...coupon,
       isSaved,
       isRedeemed,
+      redeemedAt,
+      redemptionAvailableAt,
     };
   }
 
@@ -395,19 +420,6 @@ export class CouponsService {
 
     const redemptionRules = await this.settingsService.getRedemptionRules();
     const now = new Date();
-    const startOfDay = new Date(now);
-    startOfDay.setHours(0, 0, 0, 0);
-
-    if (redemptionRules.dailyLimit > 0) {
-      const dailyRedemptions = await this.prisma.couponRedemption.count({
-        where: { userId, createdAt: { gte: startOfDay } },
-      });
-      if (dailyRedemptions >= redemptionRules.dailyLimit) {
-        throw new ConflictException(
-          `You have reached today's redemption limit of ${redemptionRules.dailyLimit}`,
-        );
-      }
-    }
 
     // A configured global cooldown controls re-redemption across coupons.
     // When it is disabled, the existing per-coupon frequency rules continue
@@ -488,11 +500,24 @@ export class CouponsService {
       },
     });
 
+    let redemptionAvailableAt: Date | null = null;
+    if (redemptionRules.cooldownValue > 0) {
+      const cooldownMinutes = redemptionRules.cooldownValue * (
+        redemptionRules.cooldownUnit === 'MONTHLY'
+          ? 30 * 24 * 60
+          : redemptionRules.cooldownUnit === 'WEEKLY'
+            ? 7 * 24 * 60
+            : 24 * 60
+      );
+      redemptionAvailableAt = new Date(redemption.createdAt.getTime() + cooldownMinutes * 60 * 1000);
+    }
+
     return {
       success: true,
       message: 'Coupon redeemed successfully',
       redemptionId: redemption.id,
       redeemedAt: redemption.createdAt,
+      redemptionAvailableAt,
       couponCode: coupon.couponCode,
       couponTitle: coupon.title,
       merchantName: coupon.merchant?.name,

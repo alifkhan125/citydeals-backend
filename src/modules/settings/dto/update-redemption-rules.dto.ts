@@ -1,4 +1,4 @@
-import { IsInt, IsIn, IsOptional, Min } from 'class-validator';
+import { IsInt, IsIn, Min } from 'class-validator';
 
 export class UpdateRedemptionRulesDto {
   @IsInt()
@@ -7,8 +7,4 @@ export class UpdateRedemptionRulesDto {
 
   @IsIn(['DAILY', 'WEEKLY', 'MONTHLY'])
   cooldownUnit!: 'DAILY' | 'WEEKLY' | 'MONTHLY';
-
-  @IsInt()
-  @Min(0)
-  dailyLimit!: number;
 }
