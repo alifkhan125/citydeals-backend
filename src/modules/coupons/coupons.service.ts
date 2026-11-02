@@ -7,14 +7,13 @@ import { UpdateCouponDto } from './dto/update-coupon.dto.js';
 import { haversineDistanceMeters } from '../../common/utils/geo.util.js';
 
 import { NotificationsService } from '../notifications/notifications.service.js';
-import { SettingsService } from '../settings/settings.service.js';
+import { nextRedemptionAt } from './redemption-policy.js';
 
 @Injectable()
 export class CouponsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
-    private readonly settingsService: SettingsService,
   ) {}
 
   async create(user: { role: string; areaId?: string | null }, dto: CreateCouponDto) {
@@ -352,23 +351,7 @@ export class CouponsService {
       redeemedAt = redeemed?.createdAt ?? null;
 
       if (redeemed) {
-        const rules = await this.settingsService.getRedemptionRules();
-        if (rules.cooldownValue > 0) {
-          const cooldownMinutes = rules.cooldownValue * (
-            rules.cooldownUnit === 'MONTHLY'
-              ? 30 * 24 * 60
-              : rules.cooldownUnit === 'WEEKLY'
-                ? 7 * 24 * 60
-                : 24 * 60
-          );
-          redemptionAvailableAt = new Date(redeemed.createdAt.getTime() + cooldownMinutes * 60 * 1000);
-        } else if (coupon.redemptionFrequency === 'DAILY') {
-          redemptionAvailableAt = new Date(redeemed.createdAt);
-          redemptionAvailableAt.setDate(redemptionAvailableAt.getDate() + 1);
-          redemptionAvailableAt.setHours(0, 0, 0, 0);
-        } else if (coupon.redemptionFrequency === 'WEEKLY') {
-          redemptionAvailableAt = new Date(redeemed.createdAt.getTime() + 7 * 24 * 60 * 60 * 1000);
-        }
+        redemptionAvailableAt = nextRedemptionAt(coupon.redemptionFrequency, redeemed.createdAt);
       }
     }
 
@@ -418,66 +401,18 @@ export class CouponsService {
       throw new BadRequestException('This coupon has expired');
     }
 
-    const redemptionRules = await this.settingsService.getRedemptionRules();
     const now = new Date();
-
-    // A configured global cooldown controls re-redemption across coupons.
-    // When it is disabled, the existing per-coupon frequency rules continue
-    // to apply unchanged.
-    if (redemptionRules.cooldownValue > 0) {
-      const cooldownMinutes = redemptionRules.cooldownValue * (
-        redemptionRules.cooldownUnit === 'MONTHLY'
-          ? 30 * 24 * 60
-          : redemptionRules.cooldownUnit === 'WEEKLY'
-            ? 7 * 24 * 60
-              : 24 * 60
-      );
-      const latestRedemption = await this.prisma.couponRedemption.findFirst({
-        where: { userId, couponId },
-        orderBy: { createdAt: 'desc' },
-      });
-      if (latestRedemption) {
-        const availableAt = new Date(latestRedemption.createdAt.getTime() + cooldownMinutes * 60 * 1000);
-        if (now < availableAt) {
-          throw new ConflictException(
-            `You can redeem this coupon again after ${availableAt.toISOString()}`,
-          );
-        }
-      }
-    }
-
-    // Check redemption frequency / limits
-    if (redemptionRules.cooldownValue === 0 && coupon.redemptionFrequency === 'ONE_TIME') {
-      const existing = await this.prisma.couponRedemption.findFirst({
-        where: { userId, couponId },
-      });
-      if (existing) {
+    const latestRedemption = await this.prisma.couponRedemption.findFirst({
+      where: { userId, couponId },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (latestRedemption) {
+      if (coupon.redemptionFrequency === 'ONE_TIME') {
         throw new ConflictException('You have already redeemed this coupon');
       }
-    } else if (redemptionRules.cooldownValue === 0 && coupon.redemptionFrequency === 'DAILY') {
-      const startOfDay = new Date();
-      startOfDay.setHours(0, 0, 0, 0);
-      const existingToday = await this.prisma.couponRedemption.findFirst({
-        where: {
-          userId,
-          couponId,
-          createdAt: { gte: startOfDay },
-        },
-      });
-      if (existingToday) {
-        throw new ConflictException('You can only redeem this coupon once per day');
-      }
-    } else if (redemptionRules.cooldownValue === 0 && coupon.redemptionFrequency === 'WEEKLY') {
-      const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      const existingWeek = await this.prisma.couponRedemption.findFirst({
-        where: {
-          userId,
-          couponId,
-          createdAt: { gte: oneWeekAgo },
-        },
-      });
-      if (existingWeek) {
-        throw new ConflictException('You can only redeem this coupon once per week');
+      const availableAt = nextRedemptionAt(coupon.redemptionFrequency, latestRedemption.createdAt);
+      if (availableAt && now < availableAt) {
+        throw new ConflictException(`You can redeem this coupon again after ${availableAt.toISOString()}`);
       }
     }
 
@@ -500,17 +435,7 @@ export class CouponsService {
       },
     });
 
-    let redemptionAvailableAt: Date | null = null;
-    if (redemptionRules.cooldownValue > 0) {
-      const cooldownMinutes = redemptionRules.cooldownValue * (
-        redemptionRules.cooldownUnit === 'MONTHLY'
-          ? 30 * 24 * 60
-          : redemptionRules.cooldownUnit === 'WEEKLY'
-            ? 7 * 24 * 60
-            : 24 * 60
-      );
-      redemptionAvailableAt = new Date(redemption.createdAt.getTime() + cooldownMinutes * 60 * 1000);
-    }
+    const redemptionAvailableAt = nextRedemptionAt(coupon.redemptionFrequency, redemption.createdAt);
 
     return {
       success: true,

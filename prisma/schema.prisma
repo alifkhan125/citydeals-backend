@@ -32,6 +32,7 @@ enum ContentStatus {
 
 enum RedemptionFrequency {
   ONE_TIME
+  HOURLY
   DAILY
   WEEKLY
   UNLIMITED
