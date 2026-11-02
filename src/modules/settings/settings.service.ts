@@ -2,6 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service.js';
 import { UpdateStoreLinksDto } from './dto/update-store-links.dto.js';
+import { UpdateRedemptionRulesDto } from './dto/update-redemption-rules.dto.js';
+import {
+  DAILY_REDEMPTION_LIMIT_KEY,
+  DEFAULT_REDEMPTION_RULES,
+  REDEMPTION_COOLDOWN_MINUTES_KEY,
+} from './redemption-rules.constants.js';
 
 const PLAY_STORE_KEY = 'playStoreUrl';
 const APP_STORE_KEY = 'appStoreUrl';
@@ -45,5 +51,38 @@ export class SettingsService {
       }),
     ]);
     return this.getStoreLinks();
+  }
+
+  async getRedemptionRules() {
+    const rows = await this.prisma.appSetting.findMany({
+      where: { key: { in: [REDEMPTION_COOLDOWN_MINUTES_KEY, DAILY_REDEMPTION_LIMIT_KEY] } },
+    });
+    const values = Object.fromEntries(rows.map((row) => [row.key, Number(row.value)]));
+    const cooldownMinutes = Math.max(0, values[REDEMPTION_COOLDOWN_MINUTES_KEY] || 0);
+    const dailyLimit = Math.max(0, values[DAILY_REDEMPTION_LIMIT_KEY] || 0);
+
+    return {
+      ...DEFAULT_REDEMPTION_RULES,
+      cooldownValue: cooldownMinutes % (24 * 60) === 0 ? cooldownMinutes / (24 * 60) : cooldownMinutes / 60,
+      cooldownUnit: cooldownMinutes > 0 && cooldownMinutes % (24 * 60) === 0 ? 'DAYS' as const : 'HOURS' as const,
+      dailyLimit,
+    };
+  }
+
+  async updateRedemptionRules(dto: UpdateRedemptionRulesDto) {
+    const cooldownMinutes = dto.cooldownValue * (dto.cooldownUnit === 'DAYS' ? 24 * 60 : 60);
+    await this.prisma.$transaction([
+      this.prisma.appSetting.upsert({
+        where: { key: REDEMPTION_COOLDOWN_MINUTES_KEY },
+        create: { key: REDEMPTION_COOLDOWN_MINUTES_KEY, value: String(cooldownMinutes) },
+        update: { value: String(cooldownMinutes) },
+      }),
+      this.prisma.appSetting.upsert({
+        where: { key: DAILY_REDEMPTION_LIMIT_KEY },
+        create: { key: DAILY_REDEMPTION_LIMIT_KEY, value: String(dto.dailyLimit) },
+        update: { value: String(dto.dailyLimit) },
+      }),
+    ]);
+    return this.getRedemptionRules();
   }
 }

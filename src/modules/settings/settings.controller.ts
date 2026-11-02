@@ -5,6 +5,7 @@ import { Roles } from '../../common/decorators/roles.decorator.js';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
 import { RolesGuard } from '../../common/guards/roles.guard.js';
 import { UpdateStoreLinksDto } from './dto/update-store-links.dto.js';
+import { UpdateRedemptionRulesDto } from './dto/update-redemption-rules.dto.js';
 import { SettingsService } from './settings.service.js';
 
 @ApiTags('Settings')
@@ -23,5 +24,18 @@ export class SettingsController {
   @Roles(Role.ADMIN)
   updateStoreLinks(@Body() dto: UpdateStoreLinksDto) {
     return this.settingsService.updateStoreLinks(dto);
+  }
+
+  @Get('redemption-rules')
+  getRedemptionRules() {
+    return this.settingsService.getRedemptionRules();
+  }
+
+  @Put('redemption-rules')
+  @ApiBearerAuth('access-token')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN)
+  updateRedemptionRules(@Body() dto: UpdateRedemptionRulesDto) {
+    return this.settingsService.updateRedemptionRules(dto);
   }
 }
