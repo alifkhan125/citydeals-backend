@@ -131,7 +131,18 @@ export class CouponsService implements OnModuleInit {
     const [items, total] = await Promise.all([
       this.prisma.coupon.findMany({
         where,
-        include: { merchant: true, area: true, category: true },
+        include: {
+          merchant: true,
+          area: true,
+          category: true,
+          _count: {
+            select: {
+              savedBy: true,
+              redemptions: true,
+              viewEvents: true,
+            },
+          },
+        },
         orderBy: { createdAt: 'desc' },
         skip: (page - 1) * limit,
         take: limit,
@@ -139,7 +150,16 @@ export class CouponsService implements OnModuleInit {
       this.prisma.coupon.count({ where }),
     ]);
 
-    return { items, meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+    return {
+      items: items.map((coupon: any) => ({
+        ...coupon,
+        likes: coupon._count?.savedBy ?? 0,
+        redemptions: coupon._count?.redemptions ?? 0,
+        views: coupon._count?.viewEvents ?? 0,
+        _count: undefined,
+      })),
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
   }
 
   async bulkStatus(dto: { ids: string[]; status: any }) {
