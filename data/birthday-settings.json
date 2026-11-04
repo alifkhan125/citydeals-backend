@@ -1,6 +1,11 @@
 {
   "enabled": true,
   "category": "Restaurant",
-  "leadTime": "On birthday",
-  "lastRunAt": "2026-11-04T11:15:24.329Z"
+  "leadTime": "7 days before",
+  "leadTimes": [
+    "7 days before",
+    "1 day before",
+    "On birthday"
+  ],
+  "lastRunAt": "2026-11-04T13:00:07.865Z"
 }

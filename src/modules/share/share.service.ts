@@ -1,5 +1,4 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../database/prisma.service.js';
 import { SettingsService } from '../settings/settings.service.js';
 
@@ -7,7 +6,6 @@ import { SettingsService } from '../settings/settings.service.js';
 export class ShareService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly configService: ConfigService,
     private readonly settingsService: SettingsService,
   ) {}
 
@@ -31,13 +29,14 @@ export class ShareService {
     });
     if (!coupon) throw new NotFoundException('Coupon not found');
 
-    const baseUrl = this.configService.get<string>('app.publicBaseUrl');
+    const settings = await this.settingsService.getStoreLinks();
+    const baseUrl = settings.baseUrl;
     const title = `${coupon.title} at ${coupon.merchant.name}`;
     const description = coupon.description;
     const image = coupon.imageUrl ?? `${baseUrl}/og/default-coupon.png`;
 
     return {
-      shareUrl: `${baseUrl}/c/${shareSlug}`,
+      shareUrl: `${baseUrl}/c/${shareSlug}/open`,
       title,
       description,
       image,
@@ -50,7 +49,7 @@ export class ShareService {
         ogTitle: title,
         ogDescription: description,
         ogImage: image,
-        ogUrl: `${baseUrl}/c/${shareSlug}`,
+        ogUrl: `${baseUrl}/c/${shareSlug}/open`,
       },
     };
   }

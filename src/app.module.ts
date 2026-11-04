@@ -26,6 +26,7 @@ import { ShareModule } from './modules/share/share.module.js';
 import { SupportModule } from './modules/support/support.module.js';
 import { UsersModule } from './modules/users/users.module.js';
 import { SettingsModule } from './modules/settings/settings.module.js';
+import { BirthdayGiftsModule } from './modules/birthday-gifts/birthday-gifts.module.js';
 
 @Module({
   imports: [
@@ -60,6 +61,7 @@ import { SettingsModule } from './modules/settings/settings.module.js';
     LocationModule,
     NotificationsModule,
     SettingsModule,
+    BirthdayGiftsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

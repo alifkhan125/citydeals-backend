@@ -24,7 +24,7 @@ export class CouponsService {
     if (user.role !== 'ADMIN' && merchant.areaId !== user.areaId) {
       throw new ForbiddenException('Cannot create coupons outside your area');
     }
-    return this.prisma.coupon.create({
+    const coupon = await this.prisma.coupon.create({
       data: {
         title: dto.title,
         description: dto.description,
@@ -41,10 +41,40 @@ export class CouponsService {
         isWhitelisted: dto.isWhitelisted ?? false,
         shareSlug: randomUUID(),
         status: dto.status ?? 'ACTIVE',
+        audience: dto.audience ?? 'ALL_USERS',
         startsAt: dto.startsAt ? new Date(dto.startsAt) : undefined,
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : undefined,
       },
     });
+    await this.syncBirthdayGift(coupon.id);
+    return coupon;
+  }
+
+  private async syncBirthdayGift(couponId: string) {
+    const coupon = await this.prisma.coupon.findUnique({
+      where: { id: couponId },
+      include: { merchant: { include: { category: true } }, category: true },
+    });
+    if (!coupon) return;
+    const existing = await this.prisma.birthdayGift.findFirst({ where: { couponId } });
+    if (coupon.audience === 'ALL_USERS') {
+      if (existing) await this.prisma.birthdayGift.update({ where: { id: existing.id }, data: { status: 'INACTIVE' } });
+      return;
+    }
+    const data = {
+      title: coupon.title,
+      description: coupon.description,
+      terms: coupon.terms,
+      imageUrl: coupon.imageUrl,
+      category: coupon.category?.name ?? coupon.merchant.category?.name ?? null,
+      merchantId: coupon.merchantId,
+      couponId: coupon.id,
+      status: coupon.status === 'ACTIVE' && !coupon.isDeleted ? 'ACTIVE' as const : 'INACTIVE' as const,
+      startsAt: coupon.startsAt,
+      expiresAt: coupon.expiresAt,
+    };
+    if (existing) await this.prisma.birthdayGift.update({ where: { id: existing.id }, data });
+    else await this.prisma.birthdayGift.create({ data });
   }
 
   async findAdmin(query: AdminCouponQueryDto) {
@@ -54,6 +84,7 @@ export class CouponsService {
     const where: any = {
       isDeleted: false,
       ...(query.status ? { status: query.status } : {}),
+      ...(query.audience ? { audience: query.audience } : {}),
       ...(query.areaId ? { areaId: query.areaId } : {}),
       ...(query.merchantId ? { merchantId: query.merchantId } : {}),
       ...(query.categoryId ? { categoryId: query.categoryId } : {}),
@@ -93,6 +124,7 @@ export class CouponsService {
       where: { id: { in: dto.ids }, isDeleted: false },
       data: { status: dto.status },
     });
+    await Promise.all(dto.ids.map((id) => this.syncBirthdayGift(id)));
     return { updated: result.count };
   }
 
@@ -101,6 +133,7 @@ export class CouponsService {
       where: { id: { in: ids }, isDeleted: false },
       data: { isDeleted: true, status: 'ARCHIVED' },
     });
+    await Promise.all(ids.map((id) => this.syncBirthdayGift(id)));
     return { deleted: result.count, softDeleted: true };
   }
 
@@ -108,7 +141,7 @@ export class CouponsService {
     const source = await this.prisma.coupon.findFirst({ where: { id, isDeleted: false } });
     if (!source) throw new NotFoundException('Coupon not found');
 
-    return this.prisma.coupon.create({
+    const duplicate = await this.prisma.coupon.create({
       data: {
         title: `${source.title} (Copy)`,
         description: source.description,
@@ -125,11 +158,14 @@ export class CouponsService {
         isWhitelisted: source.isWhitelisted,
         shareSlug: randomUUID(),
         status: 'ARCHIVED',
+        audience: source.audience,
         startsAt: source.startsAt,
         expiresAt: source.expiresAt,
       },
       include: { merchant: true, area: true, category: true },
     });
+    await this.syncBirthdayGift(duplicate.id);
+    return duplicate;
   }
 
   async importCsv(csv: string) {
@@ -171,9 +207,11 @@ export class CouponsService {
             startsAt: record.startsAt ? new Date(record.startsAt) : undefined,
             expiresAt: record.expiresAt ? new Date(record.expiresAt) : undefined,
             status: status as any,
+            audience: (record.audience || 'ALL_USERS') as any,
             shareSlug: randomUUID(),
           },
         });
+        await this.syncBirthdayGift(coupon.id);
         imported.push(coupon.id);
       } catch (error) {
         errors.push({ row, message: error instanceof Error ? error.message : 'Invalid row' });
@@ -244,6 +282,22 @@ export class CouponsService {
       ];
     }
 
+    let userRecord: { latitude: any; longitude: any; dateOfBirth: Date | null; status: string } | null = null;
+    if (user?.id) {
+      userRecord = await this.prisma.user.findUnique({
+        where: { id: user.id },
+        select: { latitude: true, longitude: true, dateOfBirth: true, status: true },
+      });
+    }
+    if (user?.role !== 'ADMIN' && user?.role !== 'STAFF') {
+      const dob = userRecord?.dateOfBirth ? new Date(userRecord.dateOfBirth) : null;
+      const now = new Date();
+      const isBirthday = !!dob && dob.getUTCMonth() === now.getUTCMonth() && dob.getUTCDate() === now.getUTCDate();
+      whereClause.audience = isBirthday
+        ? { in: ['ALL_USERS', 'BIRTHDAY_USERS_ONLY', 'ALL_USERS_AND_BIRTHDAY_GIFT'] }
+        : { in: ['ALL_USERS', 'ALL_USERS_AND_BIRTHDAY_GIFT'] };
+    }
+
     let coupons = await this.prisma.coupon.findMany({
       where: whereClause,
       include: {
@@ -288,14 +342,6 @@ export class CouponsService {
     }
 
     // Add distance and sort if user location is known
-    let userRecord = null;
-    if (user?.id) {
-      userRecord = await this.prisma.user.findUnique({
-        where: { id: user.id },
-        select: { latitude: true, longitude: true },
-      });
-    }
-
     if (userRecord?.latitude && userRecord?.longitude) {
       const userLat = Number(userRecord.latitude);
       const userLon = Number(userRecord.longitude);
@@ -350,6 +396,9 @@ export class CouponsService {
       include: { merchant: true, area: true, category: true },
     });
     if (!coupon || coupon.isDeleted || coupon.status !== 'ACTIVE') {
+      throw new NotFoundException('Coupon not found');
+    }
+    if (coupon.audience === 'BIRTHDAY_USERS_ONLY') {
       throw new NotFoundException('Coupon not found');
     }
     return coupon;
@@ -448,10 +497,12 @@ export class CouponsService {
     }
     if (categoryId !== undefined) updateData.categoryId = categoryId;
 
-    return this.prisma.coupon.update({
+    const coupon = await this.prisma.coupon.update({
       where: { id },
       data: updateData,
     });
+    await this.syncBirthdayGift(coupon.id);
+    return coupon;
   }
 
   async findById(id: string, userId?: string) {
@@ -473,6 +524,16 @@ export class CouponsService {
     }
     if (coupon.isDeleted || coupon.status !== 'ACTIVE') {
       throw new NotFoundException('Coupon not found');
+    }
+
+    if (coupon.audience === 'BIRTHDAY_USERS_ONLY') {
+      if (!userId) throw new NotFoundException('Coupon not found');
+      const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { dateOfBirth: true, status: true } });
+      const dob = user?.dateOfBirth ? new Date(user.dateOfBirth) : null;
+      const now = new Date();
+      if (!user || user.status !== 'ACTIVE' || !dob || dob.getUTCMonth() !== now.getUTCMonth() || dob.getUTCDate() !== now.getUTCDate()) {
+        throw new NotFoundException('Coupon not found');
+      }
     }
 
     let isSaved = false;
@@ -533,6 +594,15 @@ export class CouponsService {
     });
     if (!coupon) throw new NotFoundException('Coupon not found');
     if (coupon.status !== 'ACTIVE') throw new BadRequestException('Coupon is not active');
+
+    if (coupon.audience === 'BIRTHDAY_USERS_ONLY') {
+      const birthdayUser = await this.prisma.user.findUnique({ where: { id: userId }, select: { dateOfBirth: true } });
+      const dob = birthdayUser?.dateOfBirth ? new Date(birthdayUser.dateOfBirth) : null;
+      const today = new Date();
+      if (!dob || dob.getUTCMonth() !== today.getUTCMonth() || dob.getUTCDate() !== today.getUTCDate()) {
+        throw new ForbiddenException('This coupon is only available on your birthday');
+      }
+    }
 
     // Check expiration if any
     if (coupon.expiresAt && new Date() > new Date(coupon.expiresAt)) {
@@ -598,6 +668,7 @@ export class CouponsService {
       where: { id },
       data: { isDeleted: true, status: 'ARCHIVED' },
     });
+    await this.syncBirthdayGift(id);
 
     return { id, deleted: true, softDeleted: true, isDeleted: true, status: 'ARCHIVED' };
   }

@@ -1,7 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEnum, IsOptional, IsString } from 'class-validator';
 import { PaginationDto } from '../../../common/dto/pagination.dto.js';
-import { CouponStatus } from './create-coupon.dto.js';
+import { CouponAudience, CouponStatus } from './create-coupon.dto.js';
 
 export class AdminCouponQueryDto extends PaginationDto {
   @ApiPropertyOptional({ example: 'coffee' })
@@ -13,6 +13,11 @@ export class AdminCouponQueryDto extends PaginationDto {
   @IsOptional()
   @IsEnum(CouponStatus)
   status?: CouponStatus;
+
+  @ApiPropertyOptional({ enum: CouponAudience })
+  @IsOptional()
+  @IsEnum(CouponAudience)
+  audience?: CouponAudience;
 
   @ApiPropertyOptional()
   @IsOptional()

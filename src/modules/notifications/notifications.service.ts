@@ -21,6 +21,7 @@ export class NotificationsService implements OnModuleInit {
     enabled: true,
     category: 'Restaurant',
     leadTime: 'On birthday',
+    leadTimes: ['7 days before', '1 day before', 'On birthday'],
     lastRunAt: null as string | null,
   };
 
@@ -33,13 +34,13 @@ export class NotificationsService implements OnModuleInit {
     this.loadBirthdaySettings();
     // Schedule initial birthday check after 10s and periodic check every 12 hours
     setTimeout(() => {
-      this.checkAndSendBirthdayNotifications().catch((err) =>
+      this.checkAndSendBirthdayNotifications().catch((err: any) =>
         this.logger.error('Initial birthday perks check failed:', err),
       );
     }, 10000);
 
     setInterval(() => {
-      this.checkAndSendBirthdayNotifications().catch((err) =>
+      this.checkAndSendBirthdayNotifications().catch((err: any) =>
         this.logger.error('Periodic birthday perks check failed:', err),
       );
     }, 12 * 60 * 60 * 1000);
@@ -174,13 +175,14 @@ export class NotificationsService implements OnModuleInit {
       enabled: dto.enabled,
       category: dto.category,
       leadTime: dto.leadTime,
+      leadTimes: dto.leadTimes?.length ? dto.leadTimes : this.cachedBirthdaySettings.leadTimes,
     };
     this.saveBirthdaySettings();
 
     // Trigger birthday checks immediately if enabled so changes take effect
     let checkResult: any = null;
     if (this.cachedBirthdaySettings.enabled) {
-      checkResult = await this.checkAndSendBirthdayNotifications().catch((err) => {
+      checkResult = await this.checkAndSendBirthdayNotifications().catch((err: any) => {
         this.logger.error('Failed to run birthday check after update:', err);
         return { error: err.message };
       });
@@ -192,17 +194,25 @@ export class NotificationsService implements OnModuleInit {
     };
   }
 
-  async checkAndSendBirthdayNotifications() {
+  async checkAndSendBirthdayNotifications(leadDaysOverride?: number): Promise<any> {
     if (!this.cachedBirthdaySettings.enabled) {
       return { skipped: true, reason: 'Birthday perks disabled' };
     }
 
-    let leadDays = 0;
-    if (this.cachedBirthdaySettings.leadTime === '1 day before') {
-      leadDays = 1;
-    } else if (this.cachedBirthdaySettings.leadTime === '7 days before') {
-      leadDays = 7;
+    if (leadDaysOverride === undefined) {
+      const configuredLeadTimes = Array.isArray(this.cachedBirthdaySettings.leadTimes) && this.cachedBirthdaySettings.leadTimes.length
+        ? this.cachedBirthdaySettings.leadTimes
+        : ['7 days before', '1 day before', 'On birthday'];
+      const leadDaysList = configuredLeadTimes.map((value) => value === '7 days before' ? 7 : value === '1 day before' ? 1 : 0);
+      if (leadDaysList.length > 1) {
+        const checks = [];
+        for (const leadDays of [...new Set(leadDaysList)]) {
+          checks.push(await this.checkAndSendBirthdayNotifications(leadDays));
+        }
+        return { scheduledChecks: checks };
+      }
     }
+    const leadDays = leadDaysOverride ?? (this.cachedBirthdaySettings.leadTime === '7 days before' ? 7 : this.cachedBirthdaySettings.leadTime === '1 day before' ? 1 : 0);
 
     const targetDate = new Date();
     targetDate.setDate(targetDate.getDate() + leadDays);
@@ -213,6 +223,7 @@ export class NotificationsService implements OnModuleInit {
       where: {
         dateOfBirth: { not: null },
         notificationsPaused: false,
+        status: 'ACTIVE',
       },
       select: {
         id: true,
@@ -247,7 +258,10 @@ export class NotificationsService implements OnModuleInit {
 
     const alreadyNotifiedUserIds = new Set(
       recentBirthdayNotifications
-        .filter((n) => (n.data as any)?.sourceType === 'BIRTHDAY')
+        .filter((n) => {
+          const data = n.data as any;
+          return (data?.sourceType === 'BIRTHDAY' || data?.sourceType === 'BIRTHDAY_GIFT') && Number(data?.leadDays ?? 0) === leadDays;
+        })
         .map((n) => n.userId),
     );
 
@@ -259,23 +273,45 @@ export class NotificationsService implements OnModuleInit {
       return { checkedUsers: users.length, matchedUsers: matchedUsers.length, eligibleUsers: 0, sent: 0 };
     }
 
-    const title = leadDays === 0
+    let title = leadDays === 0
       ? '🎉 Happy Birthday from CityDeals!'
       : '🎂 Birthday Coming Soon! Special Perks For You';
-    const body = leadDays === 0
+    let body = leadDays === 0
       ? `Happy Birthday! Enjoy special ${this.cachedBirthdaySettings.category} perks and exclusive deals just for you today!`
       : `Your birthday is in ${leadDays} day${leadDays > 1 ? 's' : ''}! Check out exclusive ${this.cachedBirthdaySettings.category} perks waiting for you.`;
+
+    const birthdayGift = await this.prisma.birthdayGift.findFirst({
+      where: {
+        status: 'ACTIVE',
+        coupon: { is: { audience: { not: 'ALL_USERS' } } },
+        AND: [
+          { OR: [{ startsAt: null }, { startsAt: { lte: new Date() } }] },
+          { OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }] },
+        ],
+      },
+      select: { id: true, title: true, couponId: true, merchant: { select: { name: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+    const birthdayData = {
+      sourceType: birthdayGift ? 'BIRTHDAY_GIFT' : 'BIRTHDAY',
+      category: this.cachedBirthdaySettings.category,
+      leadDays,
+      ...(birthdayGift ? { giftId: birthdayGift.id } : {}),
+      ...(birthdayGift?.couponId ? { couponId: birthdayGift.couponId } : {}),
+    };
+    if (birthdayGift) {
+      title = leadDays === 0 ? `🎂 Your ${birthdayGift.title} birthday gift is ready!` : `🎁 Birthday gift from ${birthdayGift.merchant.name}`;
+      body = leadDays === 0
+        ? `Claim your birthday gift from ${birthdayGift.merchant.name} in CityDeals.`
+        : `A special birthday gift from ${birthdayGift.merchant.name} is waiting for you.`;
+    }
 
     await this.prisma.notification.createMany({
       data: eligibleUsers.map((u) => ({
         userId: u.id,
         title,
         body,
-        data: {
-          sourceType: 'BIRTHDAY',
-          category: this.cachedBirthdaySettings.category,
-          leadDays,
-        },
+        data: birthdayData,
       })),
     });
 
@@ -283,7 +319,7 @@ export class NotificationsService implements OnModuleInit {
       title,
       body,
       sendTo: 'ALL',
-    });
+    }, birthdayData);
 
     this.cachedBirthdaySettings.lastRunAt = new Date().toISOString();
     this.saveBirthdaySettings();
@@ -446,6 +482,7 @@ export class NotificationsService implements OnModuleInit {
   private async sendPushNotifications(
     users: Array<{ id: string; fcmToken: string | null }>,
     dto: SendNotificationDto,
+    extraData?: Record<string, unknown>,
   ) {
     const sourceType = dto.merchantId
       ? 'MERCHANT'
@@ -473,6 +510,7 @@ export class NotificationsService implements OnModuleInit {
         areaId: dto.areaId,
         userId: dto.userId,
         merchantId: dto.merchantId,
+        ...extraData,
       },
       channelId: 'deals',
     }));

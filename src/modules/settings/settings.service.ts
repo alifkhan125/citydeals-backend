@@ -10,6 +10,7 @@ import {
 
 const PLAY_STORE_KEY = 'playStoreUrl';
 const APP_STORE_KEY = 'appStoreUrl';
+const BASE_URL_KEY = 'baseUrl';
 
 @Injectable()
 export class SettingsService {
@@ -20,11 +21,12 @@ export class SettingsService {
 
   async getStoreLinks() {
     const rows = await this.prisma.appSetting.findMany({
-      where: { key: { in: [PLAY_STORE_KEY, APP_STORE_KEY] } },
+      where: { key: { in: [PLAY_STORE_KEY, APP_STORE_KEY, BASE_URL_KEY, 'mainUrl'] } },
     });
     const values = Object.fromEntries(rows.map((row) => [row.key, row.value]));
 
     return {
+      baseUrl: values[BASE_URL_KEY] || values.mainUrl || 'https://citydeals.app',
       playStoreUrl:
         values[PLAY_STORE_KEY] ||
         this.config.get<string>('app.playStoreUrl') ||
@@ -42,6 +44,11 @@ export class SettingsService {
         where: { key: PLAY_STORE_KEY },
         create: { key: PLAY_STORE_KEY, value: dto.playStoreUrl },
         update: { value: dto.playStoreUrl },
+      }),
+      this.prisma.appSetting.upsert({
+        where: { key: BASE_URL_KEY },
+        create: { key: BASE_URL_KEY, value: dto.baseUrl },
+        update: { value: dto.baseUrl },
       }),
       this.prisma.appSetting.upsert({
         where: { key: APP_STORE_KEY },
