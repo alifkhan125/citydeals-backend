@@ -35,6 +35,45 @@ export class AuthService {
 
     const existingUser = await this.prisma.user.findUnique({ where: { email: dto.email } });
     if (existingUser) {
+      if (existingUser.status === 'DELETED') {
+        const area = dto.latitude && dto.longitude
+          ? await this.areasService.resolveArea(dto.latitude, dto.longitude)
+          : null;
+        const restoredUser = await this.prisma.user.update({
+          where: { id: existingUser.id },
+          data: {
+            fullName: dto.fullName,
+            email: dto.email,
+            phoneNumber: dto.phoneNumber,
+            profilePictureUrl: dto.profilePictureUrl,
+            dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : null,
+            passwordHash: await bcrypt.hash(dto.password, 12),
+            role: dto.role ?? existingUser.role,
+            preferredLanguage: dto.preferredLanguage ?? existingUser.preferredLanguage,
+            acceptedTerms: dto.acceptedTerms,
+            onboardingCompleted: dto.onboardingCompleted ?? true,
+            notificationsPaused: dto.notificationsPaused ?? false,
+            areaId: area?.id ?? null,
+            latitude: dto.latitude ?? null,
+            longitude: dto.longitude ?? null,
+            status: 'ACTIVE',
+            deletedAt: null,
+            fcmToken: null,
+            refreshTokenHash: null,
+            resetPasswordOtp: null,
+            resetPasswordExpiresAt: null,
+          },
+          include: {
+            area: {
+              select: {
+                id: true, name: true, slug: true, city: true, state: true,
+                latitude: true, longitude: true,
+              },
+            },
+          },
+        });
+        return this.issueTokens(restoredUser);
+      }
       throw new ConflictException('Email is already registered');
     }
 
@@ -112,6 +151,23 @@ export class AuthService {
             preferredLanguage: 'en',
             acceptedTerms: true,
             onboardingCompleted: true,
+          },
+          include: {
+            area: {
+              select: { id: true, name: true, slug: true, city: true, state: true, latitude: true, longitude: true },
+            },
+          },
+        });
+      } else if (user.status === 'DELETED') {
+        user = await this.prisma.user.update({
+          where: { id: user.id },
+          data: {
+            fullName: payload.name || user.fullName,
+            profilePictureUrl: payload.picture || user.profilePictureUrl,
+            status: 'ACTIVE',
+            deletedAt: null,
+            fcmToken: null,
+            refreshTokenHash: null,
           },
           include: {
             area: {

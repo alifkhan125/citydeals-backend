@@ -14,8 +14,9 @@ export class AdminService {
     private readonly mailService: MailService,
   ) {}
 
-  users() {
+  users(includeDeleted = false) {
     return this.prisma.user.findMany({
+      where: includeDeleted ? undefined : { status: { not: 'DELETED' } },
       select: {
         id: true,
         fullName: true,

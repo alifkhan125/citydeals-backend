@@ -8,6 +8,8 @@ import { StaffPermissionGuard } from '../../common/guards/staff-permission.guard
 import { AreasService } from './areas.service.js';
 import { CreateAreaDto } from './dto/create-area.dto.js';
 import { UpdateAreaDto } from './dto/update-area.dto.js';
+import { AdminAreaQueryDto } from './dto/admin-area-query.dto.js';
+import { BulkIdsDto } from '../../common/dto/bulk-ids.dto.js';
 
 @ApiTags('Areas')
 @Controller('areas')
@@ -25,6 +27,23 @@ export class AreasController {
   @Get()
   findAll() {
     return this.areasService.findAll();
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @ApiBearerAuth('access-token')
+  @Roles('ADMIN')
+  @Get('admin')
+  findAdmin(@Query() query: AdminAreaQueryDto) {
+    return this.areasService.findAdmin(query);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, StaffPermissionGuard)
+  @ApiBearerAuth('access-token')
+  @Roles('ADMIN')
+  @RequirePermission('delete-content')
+  @Delete('admin/bulk')
+  bulkDelete(@Body() dto: BulkIdsDto) {
+    return this.areasService.bulkDelete(dto.ids);
   }
 
   @Get('resolve')

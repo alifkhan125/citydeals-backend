@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, Injectable, NotFoundException }
 import { PrismaService } from '../../database/prisma.service.js';
 import { CreateCategoryDto } from './dto/create-category.dto.js';
 import { UpdateCategoryDto } from './dto/update-category.dto.js';
+import { AdminCategoryQueryDto } from './dto/admin-category-query.dto.js';
 
 @Injectable()
 export class CategoriesService {
@@ -37,6 +38,40 @@ export class CategoriesService {
       },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     });
+  }
+
+  async findAdmin(query: AdminCategoryQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 25;
+    const search = query.search?.trim();
+    const where: any = {
+      isDeleted: false,
+      ...(query.status ? { status: query.status } : {}),
+      ...(search ? { OR: [
+        { name: { contains: search, mode: 'insensitive' } },
+        { slug: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+      ] } : {}),
+    };
+    if (query.idsOnly === 'true') {
+      const ids = await this.prisma.category.findMany({ where, select: { id: true } });
+      return { ids: ids.map((item) => item.id) };
+    }
+    const [items, total] = await Promise.all([
+      this.prisma.category.findMany({ where, include: { _count: { select: { coupons: true, merchants: true } } }, orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }], skip: (page - 1) * limit, take: limit }),
+      this.prisma.category.count({ where }),
+    ]);
+    return { items, meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+  }
+
+  async bulkStatus(dto: { ids: string[]; status: 'ACTIVE' | 'INACTIVE' }) {
+    const result = await this.prisma.category.updateMany({ where: { id: { in: dto.ids }, isDeleted: false }, data: { status: dto.status } });
+    return { updated: result.count };
+  }
+
+  async bulkDelete(ids: string[]) {
+    const result = await this.prisma.category.updateMany({ where: { id: { in: ids }, isDeleted: false }, data: { isDeleted: true, status: 'INACTIVE' } });
+    return { deleted: result.count, softDeleted: true };
   }
 
   async findCoupons(categorySlugOrId: string, areaSlug?: string) {

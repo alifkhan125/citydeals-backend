@@ -11,6 +11,10 @@ import { CouponsService } from './coupons.service.js';
 import { CreateCouponDto } from './dto/create-coupon.dto.js';
 import { FilterCouponDto } from './dto/filter-coupon.dto.js';
 import { UpdateCouponDto } from './dto/update-coupon.dto.js';
+import { AdminCouponQueryDto } from './dto/admin-coupon-query.dto.js';
+import { BulkIdsDto } from '../../common/dto/bulk-ids.dto.js';
+import { BulkCouponStatusDto } from './dto/bulk-coupon-status.dto.js';
+import { Body as BodyType } from '@nestjs/common';
 
 @ApiTags('Coupons')
 @Controller('coupons')
@@ -31,6 +35,42 @@ export class CouponsController {
   @Get()
   find(@GetUser() user: { role?: string; areaId?: string | null } | null, @Query() filter: FilterCouponDto) {
     return this.couponsService.find(user, filter);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, StaffPermissionGuard)
+  @ApiBearerAuth('access-token')
+  @Roles('ADMIN')
+  @RequirePermission('create-edit-coupons')
+  @Get('admin')
+  findAdmin(@Query() query: AdminCouponQueryDto) {
+    return this.couponsService.findAdmin(query);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, StaffPermissionGuard)
+  @ApiBearerAuth('access-token')
+  @Roles('ADMIN')
+  @RequirePermission('create-edit-coupons')
+  @Post('admin/import')
+  importCsv(@BodyType('csv') csv: string) {
+    return this.couponsService.importCsv(csv);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, StaffPermissionGuard)
+  @ApiBearerAuth('access-token')
+  @Roles('ADMIN')
+  @RequirePermission('create-edit-coupons')
+  @Patch('admin/bulk-status')
+  bulkStatus(@Body() dto: BulkCouponStatusDto) {
+    return this.couponsService.bulkStatus(dto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, StaffPermissionGuard)
+  @ApiBearerAuth('access-token')
+  @Roles('ADMIN')
+  @RequirePermission('delete-content')
+  @Delete('admin/bulk')
+  bulkDelete(@Body() dto: BulkIdsDto) {
+    return this.couponsService.bulkDelete(dto.ids);
   }
 
   @Get('public/:shareSlug')
@@ -103,6 +143,15 @@ export class CouponsController {
   @Delete(':id')
   remove(@Param('id') id: string) {
     return this.couponsService.remove(id);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, StaffPermissionGuard)
+  @ApiBearerAuth('access-token')
+  @Roles('ADMIN', 'ADVERTISER')
+  @RequirePermission('create-edit-coupons')
+  @Post(':id/duplicate')
+  duplicate(@Param('id') id: string) {
+    return this.couponsService.duplicate(id);
   }
 
   @UseGuards(JwtAuthGuard, RolesGuard, StaffPermissionGuard)

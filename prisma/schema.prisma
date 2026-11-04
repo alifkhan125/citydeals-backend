@@ -93,6 +93,8 @@ model Area {
   coupons   Coupon[]
 
   @@index([slug])
+  @@index([isDeleted, name])
+  @@index([city, state])
 }
 
 model Category {
@@ -145,6 +147,8 @@ model Merchant {
 
   @@index([areaId])
   @@index([categoryId])
+  @@index([isDeleted, status, name])
+  @@index([areaId, isDeleted])
 }
 
 model Coupon {
@@ -159,7 +163,7 @@ model Coupon {
   discussion          String?
   terms               String?
   shareSlug           String              @unique
-  status              CouponStatus        @default(ARCHIVED)
+  status              CouponStatus        @default(ACTIVE)
   isDeleted           Boolean             @default(false)
   startsAt            DateTime?
   expiresAt           DateTime?
@@ -181,6 +185,9 @@ model Coupon {
   @@index([areaId, status])
   @@index([categoryId])
   @@index([merchantId])
+  @@index([isDeleted, status, createdAt])
+  @@index([merchantId, isDeleted])
+  @@index([areaId, isDeleted])
 }
 
 model StaffRole {

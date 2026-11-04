@@ -131,41 +131,18 @@ export class UsersService {
     }
 
     const deletedAt = new Date();
-    const anonymizedEmail = `deleted_${userId}@deleted.citydeals.invalid`;
-
     await this.prisma.$transaction(async (tx) => {
-      // Keep the User row for audit/reporting, but remove its identity and access.
+      // Keep the complete user record for restore/history. Only access and
+      // short-lived/security/device credentials are invalidated.
       await tx.user.update({
         where: { id: userId },
         data: {
           status: 'DELETED',
           deletedAt,
-          email: anonymizedEmail,
-          fullName: null,
-          phoneNumber: null,
-          profilePictureUrl: null,
-          dateOfBirth: null,
-          latitude: null,
-          longitude: null,
           fcmToken: null,
-          passwordHash: '',
           refreshTokenHash: null,
           resetPasswordOtp: null,
           resetPasswordExpiresAt: null,
-        },
-      });
-
-      await tx.couponViewEvent.updateMany({
-        where: { userId },
-        data: { userId: null },
-      });
-
-      await tx.supportTicket.updateMany({
-        where: { userId },
-        data: {
-          userId: null,
-          fullName: 'Deleted User',
-          email: 'deleted@deleted.citydeals.invalid',
         },
       });
     });

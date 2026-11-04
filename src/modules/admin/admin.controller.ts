@@ -93,7 +93,9 @@ export class AdminController {
   }
 
   // ─── Users ────────────────────────────────────────────────────────────────
-  @Get('users') users() { return this.admin.users(); }
+  @Get('users') users(@Query('includeDeleted') includeDeleted?: string) {
+    return this.admin.users(includeDeleted === 'true');
+  }
   @Get('users/:id') user(@Param('id') id: string) { return this.admin.user(id); }
 
   @Patch('users/:id/status')

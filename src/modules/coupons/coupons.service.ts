@@ -4,10 +4,12 @@ import { PrismaService } from '../../database/prisma.service.js';
 import { CreateCouponDto } from './dto/create-coupon.dto.js';
 import { FilterCouponDto } from './dto/filter-coupon.dto.js';
 import { UpdateCouponDto } from './dto/update-coupon.dto.js';
+import { AdminCouponQueryDto } from './dto/admin-coupon-query.dto.js';
 import { haversineDistanceMeters } from '../../common/utils/geo.util.js';
 
 import { NotificationsService } from '../notifications/notifications.service.js';
 import { nextRedemptionAt } from './redemption-policy.js';
+import { csvRecords } from '../../common/utils/csv.util.js';
 
 @Injectable()
 export class CouponsService {
@@ -38,11 +40,147 @@ export class CouponsService {
         categoryId: dto.categoryId,
         isWhitelisted: dto.isWhitelisted ?? false,
         shareSlug: randomUUID(),
-        status: dto.status ?? 'ARCHIVED',
+        status: dto.status ?? 'ACTIVE',
         startsAt: dto.startsAt ? new Date(dto.startsAt) : undefined,
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : undefined,
       },
     });
+  }
+
+  async findAdmin(query: AdminCouponQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 25;
+    const search = query.search?.trim();
+    const where: any = {
+      isDeleted: false,
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.areaId ? { areaId: query.areaId } : {}),
+      ...(query.merchantId ? { merchantId: query.merchantId } : {}),
+      ...(query.categoryId ? { categoryId: query.categoryId } : {}),
+      ...(search
+        ? {
+            OR: [
+              { title: { contains: search, mode: 'insensitive' } },
+              { description: { contains: search, mode: 'insensitive' } },
+              { couponCode: { contains: search, mode: 'insensitive' } },
+              { merchant: { name: { contains: search, mode: 'insensitive' } } },
+            ],
+          }
+        : {}),
+    };
+
+    if (query.idsOnly === 'true') {
+      const ids = await this.prisma.coupon.findMany({ where, select: { id: true } });
+      return { ids: ids.map((item) => item.id) };
+    }
+
+    const [items, total] = await Promise.all([
+      this.prisma.coupon.findMany({
+        where,
+        include: { merchant: true, area: true, category: true },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.coupon.count({ where }),
+    ]);
+
+    return { items, meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+  }
+
+  async bulkStatus(dto: { ids: string[]; status: any }) {
+    const result = await this.prisma.coupon.updateMany({
+      where: { id: { in: dto.ids }, isDeleted: false },
+      data: { status: dto.status },
+    });
+    return { updated: result.count };
+  }
+
+  async bulkDelete(ids: string[]) {
+    const result = await this.prisma.coupon.updateMany({
+      where: { id: { in: ids }, isDeleted: false },
+      data: { isDeleted: true, status: 'ARCHIVED' },
+    });
+    return { deleted: result.count, softDeleted: true };
+  }
+
+  async duplicate(id: string) {
+    const source = await this.prisma.coupon.findFirst({ where: { id, isDeleted: false } });
+    if (!source) throw new NotFoundException('Coupon not found');
+
+    return this.prisma.coupon.create({
+      data: {
+        title: `${source.title} (Copy)`,
+        description: source.description,
+        imageUrl: source.imageUrl,
+        couponCode: source.couponCode,
+        couponLink: source.couponLink,
+        redemptionLimit: source.redemptionLimit,
+        redemptionFrequency: source.redemptionFrequency,
+        discussion: source.discussion,
+        terms: source.terms,
+        merchantId: source.merchantId,
+        areaId: source.areaId,
+        categoryId: source.categoryId,
+        isWhitelisted: source.isWhitelisted,
+        shareSlug: randomUUID(),
+        status: 'ARCHIVED',
+        startsAt: source.startsAt,
+        expiresAt: source.expiresAt,
+      },
+      include: { merchant: true, area: true, category: true },
+    });
+  }
+
+  async importCsv(csv: string) {
+    if (!csv?.trim()) throw new BadRequestException('CSV content is required');
+    const records = csvRecords(csv);
+    const imported: string[] = [];
+    const errors: Array<{ row: number; message: string }> = [];
+
+    for (const [index, record] of records.entries()) {
+      const row = index + 2;
+      try {
+        if (!record.title || !record.description || !record.business || !record.area) {
+          throw new Error('title, description, business and area are required');
+        }
+        const merchant = await this.prisma.merchant.findFirst({ where: { name: record.business, isDeleted: false } });
+        if (!merchant) throw new Error(`Business not found: ${record.business}`);
+        const area = await this.prisma.area.findFirst({ where: { slug: record.area, isDeleted: false } });
+        if (!area) throw new Error(`Area not found: ${record.area}`);
+        const category = record.category ? await this.prisma.category.findFirst({ where: { slug: record.category, isDeleted: false } }) : null;
+        if (record.category && !category) throw new Error(`Category not found: ${record.category}`);
+        const status = record.status || 'ACTIVE';
+        if (!['ACTIVE', 'ARCHIVED', 'EXPIRED', 'SUSPENDED'].includes(status)) throw new Error(`Invalid status: ${status}`);
+        const existing = await this.prisma.coupon.findFirst({ where: { title: record.title, merchantId: merchant.id, isDeleted: false } });
+        if (existing) throw new Error('Duplicate coupon title for this business');
+
+        const coupon = await this.prisma.coupon.create({
+          data: {
+            title: record.title,
+            description: record.description,
+            merchantId: merchant.id,
+            areaId: area.id,
+            categoryId: category?.id,
+            couponCode: record.couponCode || undefined,
+            couponLink: record.couponLink || undefined,
+            imageUrl: record.imageUrl || undefined,
+            terms: record.terms || undefined,
+            discussion: record.discussion || undefined,
+            redemptionLimit: record.redemptionLimit ? Number(record.redemptionLimit) : undefined,
+            startsAt: record.startsAt ? new Date(record.startsAt) : undefined,
+            expiresAt: record.expiresAt ? new Date(record.expiresAt) : undefined,
+            status: status as any,
+            shareSlug: randomUUID(),
+          },
+        });
+        imported.push(coupon.id);
+      } catch (error) {
+        errors.push({ row, message: error instanceof Error ? error.message : 'Invalid row' });
+      }
+    }
+
+    return { imported: imported.length, failed: errors.length, ids: imported, errors };
   }
 
   async find(user: { id?: string; role?: string; areaId?: string | null } | null, filter: FilterCouponDto) {
