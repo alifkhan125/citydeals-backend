@@ -14,8 +14,12 @@ import { VerifyOtpDto } from './dto/verify-otp.dto.js';
 import { ResetPasswordDto } from './dto/reset-password.dto.js';
 import { OAuth2Client } from 'google-auth-library';
 import { GoogleLoginDto } from './dto/google-login.dto.js';
+import { AppleLoginDto } from './dto/apple-login.dto.js';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 import { NotificationsService } from '../notifications/notifications.service.js';
+
+const APPLE_JWKS = createRemoteJWKSet(new URL('https://appleid.apple.com/auth/keys'));
 
 @Injectable()
 export class AuthService {
@@ -180,6 +184,74 @@ export class AuthService {
       return this.issueTokens(user);
     } catch (error) {
       throw new UnauthorizedException('Invalid Google token');
+    }
+  }
+
+  async appleLogin(dto: AppleLoginDto) {
+    try {
+      const audience = this.configService.get<string>('APPLE_CLIENT_ID') || 'com.citydeals.app';
+      const { payload } = await jwtVerify(dto.identityToken, APPLE_JWKS, {
+        issuer: 'https://appleid.apple.com',
+        audience,
+      });
+
+      const appleSubject = typeof payload.sub === 'string' ? payload.sub : null;
+      const tokenEmail = typeof payload.email === 'string' ? payload.email : undefined;
+      const email = tokenEmail || dto.email;
+      if (!appleSubject) throw new UnauthorizedException('Invalid Apple token');
+
+      let user = await this.prisma.user.findUnique({
+        where: { appleSubject },
+        include: { area: { select: { id: true, name: true, slug: true, city: true, state: true, latitude: true, longitude: true } } },
+      });
+
+      if (!user && email) {
+        user = await this.prisma.user.findUnique({
+          where: { email: email.toLowerCase() },
+          include: { area: { select: { id: true, name: true, slug: true, city: true, state: true, latitude: true, longitude: true } } },
+        });
+      }
+
+      if (!user && !email) {
+        throw new BadRequestException('Apple did not provide an email. Please sign in again.');
+      }
+
+      const displayName = dto.fullName || 'Apple User';
+      if (!user) {
+        user = await this.prisma.user.create({
+          data: {
+            fullName: displayName,
+            email: email!,
+            appleSubject,
+            passwordHash: await bcrypt.hash(Math.random().toString(36).slice(-10), 12),
+            role: 'USER',
+            preferredLanguage: 'en',
+            acceptedTerms: true,
+            onboardingCompleted: true,
+          },
+          include: { area: { select: { id: true, name: true, slug: true, city: true, state: true, latitude: true, longitude: true } } },
+        });
+      } else {
+        if (user.status === 'BANNED') throw new ForbiddenException('This user is banned');
+        if (user.status === 'SUSPENDED') throw new ForbiddenException('This user is suspended');
+
+        user = await this.prisma.user.update({
+          where: { id: user.id },
+          data: {
+            appleSubject: user.appleSubject || appleSubject,
+            ...(user.status === 'DELETED'
+              ? { status: 'ACTIVE', deletedAt: null, fcmToken: null, refreshTokenHash: null }
+              : {}),
+            ...(user.fullName ? {} : { fullName: displayName }),
+          },
+          include: { area: { select: { id: true, name: true, slug: true, city: true, state: true, latitude: true, longitude: true } } },
+        });
+      }
+
+      return this.issueTokens(user);
+    } catch (error) {
+      if (error instanceof BadRequestException || error instanceof ForbiddenException) throw error;
+      throw new UnauthorizedException('Invalid Apple token');
     }
   }
 

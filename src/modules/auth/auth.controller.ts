@@ -11,6 +11,7 @@ import { ChangePasswordDto } from './dto/change-password.dto.js';
 import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import { VerifyOtpDto } from './dto/verify-otp.dto.js';
 import { ResetPasswordDto } from './dto/reset-password.dto.js';
+import { AppleLoginDto } from './dto/apple-login.dto.js';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -37,6 +38,11 @@ export class AuthController {
   @Post('google')
   googleLogin(@Body() dto: import('./dto/google-login.dto.js').GoogleLoginDto) {
     return this.authService.googleLogin(dto);
+  }
+
+  @Post('apple')
+  appleLogin(@Body() dto: AppleLoginDto) {
+    return this.authService.appleLogin(dto);
   }
 
   @Post('forgot-password')

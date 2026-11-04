@@ -62,6 +62,7 @@ model User {
   id                       String     @id @default(uuid())
   fullName                 String?
   email                    String     @unique
+  appleSubject             String?    @unique
   phoneNumber              String?
   profilePictureUrl        String?
   dateOfBirth              DateTime?

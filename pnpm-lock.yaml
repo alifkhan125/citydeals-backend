@@ -79,6 +79,9 @@ importers:
       ioredis:
         specifier: ^5.8.2
         version: 5.11.1(supports-color@7.2.0)
+      jose:
+        specifier: ^6.2.15
+        version: 6.2.15
       multer:
         specifier: ^2.3.0
         version: 2.4.0
@@ -2406,6 +2409,9 @@ packages:
 
   jose@4.15.9:
     resolution: {integrity: sha512-1vUQX+IdDMVPj4k8kOxgUqlcK518yluMuGZwqlr44FS1ppZB/5GWh4rZG89erpOBOJjU/OBsnCVFfapsRz6nEA==}
+
+  jose@6.2.15:
+    resolution: {integrity: sha512-qdF6ewcZARtef63fJ9AKKZPgxw+t7USH6HLXYcD4CrdmSvDp79rpJSPFEKc90QBeGS63u1KQtN2MZQHC0yDIzA==}
 
   js-tokens@10.0.0:
     resolution: {integrity: sha512-lM/UBzQmfJRo9ABXbPWemivdCW8V2G8FHaHdypQaIy523snUjog0W71ayWXTjiR+ixeMyVHN2XcpnTd/liPg/Q==}
@@ -5801,6 +5807,8 @@ snapshots:
   jiti@2.7.0: {}
 
   jose@4.15.9: {}
+
+  jose@6.2.15: {}
 
   js-tokens@10.0.0: {}
 
