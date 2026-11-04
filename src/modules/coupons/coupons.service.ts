@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../database/prisma.service.js';
 import { CreateCouponDto } from './dto/create-coupon.dto.js';
@@ -12,11 +12,34 @@ import { nextRedemptionAt } from './redemption-policy.js';
 import { csvRecords } from '../../common/utils/csv.util.js';
 
 @Injectable()
-export class CouponsService {
+export class CouponsService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
   ) {}
+
+  onModuleInit() {
+    // Keep expired coupons out of the published catalog even when no admin opens the dashboard.
+    void this.archiveExpiredCoupons();
+    setInterval(() => {
+      void this.archiveExpiredCoupons();
+    }, 5 * 60 * 1000);
+  }
+
+  private async archiveExpiredCoupons() {
+    const expired = await this.prisma.coupon.findMany({
+      where: { status: 'ACTIVE', isDeleted: false, expiresAt: { lt: new Date() } },
+      select: { id: true },
+    });
+    if (!expired.length) return { archived: 0 };
+
+    await this.prisma.coupon.updateMany({
+      where: { id: { in: expired.map((coupon) => coupon.id) } },
+      data: { status: 'ARCHIVED' },
+    });
+    await Promise.all(expired.map((coupon) => this.syncBirthdayGift(coupon.id)));
+    return { archived: expired.length };
+  }
 
   async create(user: { role: string; areaId?: string | null }, dto: CreateCouponDto) {
     const merchant = await this.prisma.merchant.findUnique({ where: { id: dto.merchantId } });
@@ -582,7 +605,7 @@ export class CouponsService {
     return { couponId, views };
   }
 
-  async redeemCoupon(userId: string, couponId: string) {
+  async redeemCoupon(userId: string, couponId: string, enteredCouponCode: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { status: true } });
     if (!user) throw new NotFoundException('User not found');
     if (user.status === 'BANNED') throw new ForbiddenException('This user is banned');
@@ -594,6 +617,12 @@ export class CouponsService {
     });
     if (!coupon) throw new NotFoundException('Coupon not found');
     if (coupon.status !== 'ACTIVE') throw new BadRequestException('Coupon is not active');
+
+    const expectedCode = coupon.couponCode?.trim().toUpperCase();
+    const receivedCode = enteredCouponCode?.trim().toUpperCase();
+    if (!expectedCode || !receivedCode || expectedCode !== receivedCode) {
+      throw new ForbiddenException('Invalid coupon code. Please check the coupon code and try again.');
+    }
 
     if (coupon.audience === 'BIRTHDAY_USERS_ONLY') {
       const birthdayUser = await this.prisma.user.findUnique({ where: { id: userId }, select: { dateOfBirth: true } });

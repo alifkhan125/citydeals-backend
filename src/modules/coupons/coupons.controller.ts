@@ -14,6 +14,7 @@ import { UpdateCouponDto } from './dto/update-coupon.dto.js';
 import { AdminCouponQueryDto } from './dto/admin-coupon-query.dto.js';
 import { BulkIdsDto } from '../../common/dto/bulk-ids.dto.js';
 import { BulkCouponStatusDto } from './dto/bulk-coupon-status.dto.js';
+import { RedeemCouponDto } from './dto/redeem-coupon.dto.js';
 import { Body as BodyType } from '@nestjs/common';
 
 @ApiTags('Coupons')
@@ -109,8 +110,8 @@ export class CouponsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')
   @Post(':id/redeem')
-  redeemCoupon(@GetUser() user: { id: string }, @Param('id') id: string) {
-    return this.couponsService.redeemCoupon(user.id, id);
+  redeemCoupon(@GetUser() user: { id: string }, @Param('id') id: string, @Body() dto: RedeemCouponDto) {
+    return this.couponsService.redeemCoupon(user.id, id, dto.couponCode);
   }
 
   @UseGuards(OptionalJwtAuthGuard)

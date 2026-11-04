@@ -13,7 +13,7 @@ describe('coupon redemption frequency', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(now);
-    coupon = { id: 'coupon', status: 'ACTIVE', redemptionFrequency: 'DAILY', merchant: { name: 'Shop' } };
+    coupon = { id: 'coupon', status: 'ACTIVE', couponCode: 'SHOP-123', redemptionFrequency: 'DAILY', merchant: { name: 'Shop' } };
     latest = null;
     prisma = {
       user: { findUnique: vi.fn().mockResolvedValue({ status: 'ACTIVE' }) },
@@ -32,7 +32,7 @@ describe('coupon redemption frequency', () => {
 
   it.each(['HOURLY', 'DAILY', 'WEEKLY'])('%s returns the same next time after redeem and detail reload', async (frequency) => {
     coupon.redemptionFrequency = frequency;
-    const result = await service.redeemCoupon('user', 'coupon');
+    const result = await service.redeemCoupon('user', 'coupon', 'shop-123');
     latest = { createdAt: now };
     const detail = await service.findById('coupon', 'user');
     expect(result.redemptionAvailableAt).toEqual(nextRedemptionAt(frequency, now));
@@ -43,7 +43,7 @@ describe('coupon redemption frequency', () => {
   it.each(['HOURLY', 'DAILY', 'WEEKLY'])('%s rejects repeat redemption during its own waiting period', async (frequency) => {
     coupon.redemptionFrequency = frequency;
     latest = { createdAt: new Date(now.getTime() - 60_000) };
-    await expect(service.redeemCoupon('user', 'coupon')).rejects.toThrow('again after');
+    await expect(service.redeemCoupon('user', 'coupon', 'SHOP-123')).rejects.toThrow('again after');
     expect(prisma.couponRedemption.create).not.toHaveBeenCalled();
   });
 
@@ -51,33 +51,38 @@ describe('coupon redemption frequency', () => {
     coupon.redemptionFrequency = frequency;
     latest = { createdAt: now };
     vi.setSystemTime(nextRedemptionAt(frequency, now)!);
-    await expect(service.redeemCoupon('user', 'coupon')).resolves.toMatchObject({ success: true });
+    await expect(service.redeemCoupon('user', 'coupon', 'SHOP-123')).resolves.toMatchObject({ success: true });
   });
 
   it('ONE_TIME stays redeemed permanently', async () => {
     coupon.redemptionFrequency = 'ONE_TIME';
     latest = { createdAt: new Date('2020-01-01T00:00:00Z') };
-    await expect(service.redeemCoupon('user', 'coupon')).rejects.toThrow('already redeemed');
+    await expect(service.redeemCoupon('user', 'coupon', 'SHOP-123')).rejects.toThrow('already redeemed');
     expect(prisma.couponRedemption.create).not.toHaveBeenCalled();
   });
 
   it('UNLIMITED allows immediate repeat redemption without a waiting time', async () => {
     coupon.redemptionFrequency = 'UNLIMITED';
     latest = { createdAt: now };
-    await expect(service.redeemCoupon('user', 'coupon')).resolves.toMatchObject({ success: true, redemptionAvailableAt: null });
+    await expect(service.redeemCoupon('user', 'coupon', 'SHOP-123')).resolves.toMatchObject({ success: true, redemptionAvailableAt: null });
   });
 
   it('preserves total redemption limits even for unlimited frequency', async () => {
     coupon.redemptionFrequency = 'UNLIMITED';
     coupon.redemptionLimit = 2;
     prisma.couponRedemption.count.mockResolvedValue(2);
-    await expect(service.redeemCoupon('user', 'coupon')).rejects.toThrow('total redemption limit');
+    await expect(service.redeemCoupon('user', 'coupon', 'SHOP-123')).rejects.toThrow('total redemption limit');
     expect(prisma.couponRedemption.create).not.toHaveBeenCalled();
   });
 
   it.each(['BANNED', 'SUSPENDED'])('still blocks %s users', async (status) => {
     prisma.user.findUnique.mockResolvedValue({ status });
-    await expect(service.redeemCoupon('user', 'coupon')).rejects.toThrow(status.toLowerCase());
+    await expect(service.redeemCoupon('user', 'coupon', 'SHOP-123')).rejects.toThrow(status.toLowerCase());
+  });
+
+  it('rejects an invalid coupon code before creating a redemption', async () => {
+    await expect(service.redeemCoupon('user', 'coupon', 'WRONG-CODE')).rejects.toThrow('Invalid coupon code');
+    expect(prisma.couponRedemption.create).not.toHaveBeenCalled();
   });
 
   it('DAILY resets at the next server calendar midnight', () => {
