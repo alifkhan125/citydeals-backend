@@ -2,6 +2,7 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
   Patch,
   Post,
@@ -33,6 +34,11 @@ export class UsersController {
   @Get('me')
   getMe(@GetUser() user: { id: string }) {
     return this.usersService.getMe(user.id);
+  }
+
+  @Delete('me')
+  deleteMe(@GetUser() user: { id: string }) {
+    return this.usersService.softDeleteMe(user.id);
   }
 
   @Post('me/avatar')

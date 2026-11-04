@@ -116,6 +116,66 @@ export class UsersService {
     });
   }
 
+  async softDeleteMe(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true, status: true },
+    });
+
+    if (!user) throw new NotFoundException('User not found');
+    if (user.status === 'DELETED') {
+      return { deleted: true, message: 'Account already deleted' };
+    }
+    if (user.role === 'ADMIN') {
+      throw new NotFoundException('User not found');
+    }
+
+    const deletedAt = new Date();
+    const anonymizedEmail = `deleted_${userId}@deleted.citydeals.invalid`;
+
+    await this.prisma.$transaction(async (tx) => {
+      // Keep the User row for audit/reporting, but remove its identity and access.
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          status: 'DELETED',
+          deletedAt,
+          email: anonymizedEmail,
+          fullName: null,
+          phoneNumber: null,
+          profilePictureUrl: null,
+          dateOfBirth: null,
+          latitude: null,
+          longitude: null,
+          fcmToken: null,
+          passwordHash: '',
+          refreshTokenHash: null,
+          resetPasswordOtp: null,
+          resetPasswordExpiresAt: null,
+        },
+      });
+
+      await tx.couponViewEvent.updateMany({
+        where: { userId },
+        data: { userId: null },
+      });
+
+      await tx.supportTicket.updateMany({
+        where: { userId },
+        data: {
+          userId: null,
+          fullName: 'Deleted User',
+          email: 'deleted@deleted.citydeals.invalid',
+        },
+      });
+    });
+
+    return {
+      deleted: true,
+      message: 'Your account and personal information have been deleted.',
+    };
+  }
+
   private async ensureUser(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
     if (!user) throw new NotFoundException('User not found');

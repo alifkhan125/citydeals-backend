@@ -149,6 +149,7 @@ export class AuthService {
     }
     if (user.status === 'BANNED') throw new ForbiddenException('This user is banned');
     if (user.status === 'SUSPENDED') throw new ForbiddenException('This user is suspended');
+    if (user.status === 'DELETED') throw new ForbiddenException('This account has been deleted');
 
     // If ADMIN role, look up their StaffAccount to get the roleKey for permission checks
     let staffRoleKey: string | undefined;

@@ -23,6 +23,7 @@ enum UserStatus {
   ACTIVE
   SUSPENDED
   BANNED
+  DELETED
 }
 
 enum ContentStatus {
@@ -62,6 +63,7 @@ model User {
   fcmToken                 String?
   createdAt                DateTime   @default(now())
   updatedAt                DateTime   @updatedAt
+  deletedAt                DateTime?
 
   area               Area?                  @relation(fields: [areaId], references: [id])
   merchants          Merchant[]
