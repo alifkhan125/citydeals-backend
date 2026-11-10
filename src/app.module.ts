@@ -7,7 +7,8 @@ import appConfig from './config/app.config.js';
 import authConfig from './config/auth.config.js';
 import redisConfig from './config/redis.config.js';
 import mailConfig from './config/mail.config.js';
-import cloudinaryConfig from './config/cloudinary.config.js';
+// import cloudinaryConfig from './config/cloudinary.config.js';
+import gcsConfig from './config/gcs.config.js';
 import { PrismaModule } from './database/prisma.module.js';
 import { UploadModule } from './modules/upload/upload.module.js';
 import { AreasModule } from './modules/areas/areas.module.js';
@@ -32,7 +33,7 @@ import { BirthdayGiftsModule } from './modules/birthday-gifts/birthday-gifts.mod
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [appConfig, authConfig, redisConfig, mailConfig, cloudinaryConfig],
+      load: [appConfig, authConfig, redisConfig, mailConfig, gcsConfig],
     }),
     BullModule.forRootAsync({
       inject: [ConfigService],

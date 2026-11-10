@@ -1,3 +1,9 @@
+/**
+ * CLOUDINARY SERVICE (HIDDEN / DISABLED)
+ * Replaced by Google Cloud Storage (StorageService) in storage.service.ts
+ */
+
+/*
 import { Injectable, InternalServerErrorException, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { v2 as cloudinary, UploadApiResponse, UploadApiErrorResponse } from 'cloudinary';
@@ -149,3 +155,4 @@ export class CloudinaryService implements OnModuleInit {
     }
   }
 }
+*/

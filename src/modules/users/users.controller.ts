@@ -15,7 +15,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import 'multer';
 import { GetUser } from '../../common/decorators/get-user.decorator.js';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
-import { CloudinaryService } from '../upload/cloudinary.service.js';
+import { StorageService } from '../upload/storage.service.js';
 import { UpdateLanguageDto } from './dto/update-language.dto.js';
 import { UpdateMeDto } from './dto/update-me.dto.js';
 import { UpdateNotificationSettingsDto } from './dto/update-notification-settings.dto.js';
@@ -28,7 +28,7 @@ import { UsersService } from './users.service.js';
 export class UsersController {
   constructor(
     private readonly usersService: UsersService,
-    private readonly cloudinaryService: CloudinaryService,
+    private readonly storageService: StorageService,
   ) {}
 
   @Get('me')
@@ -75,7 +75,7 @@ export class UsersController {
     if (!file) {
       throw new BadRequestException('Avatar image file is required');
     }
-    const uploaded = await this.cloudinaryService.uploadFile(file, {
+    const uploaded = await this.storageService.uploadFile(file, {
       folder: 'avatars',
       publicId: `user_${user.id}`,
     });

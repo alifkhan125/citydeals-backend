@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import QRCode from 'qrcode';
-import { CloudinaryService } from '../upload/cloudinary.service.js';
+import { StorageService } from '../upload/storage.service.js';
 
 @Injectable()
 export class QrService {
@@ -9,7 +9,7 @@ export class QrService {
 
   constructor(
     private readonly configService: ConfigService,
-    private readonly cloudinaryService: CloudinaryService,
+    private readonly storageService: StorageService,
   ) {}
 
   async generateAreaQrCode(slug: string): Promise<string> {
@@ -25,13 +25,13 @@ export class QrService {
 
   private async uploadQrAsset(slug: string, dataUrl: string): Promise<string> {
     try {
-      const res = await this.cloudinaryService.uploadBase64(dataUrl, {
+      const res = await this.storageService.uploadBase64(dataUrl, {
         folder: 'qr/areas',
         publicId: `qr_${slug}`,
       });
       return res.secureUrl;
     } catch (error) {
-      this.logger.warn(`Failed to upload QR to Cloudinary, falling back to data URL: ${error}`);
+      this.logger.warn(`Failed to upload QR to Google Cloud Storage, falling back to data URL: ${error}`);
       return dataUrl;
     }
   }

@@ -21,24 +21,24 @@ import {
   ApiTags,
 } from '@nestjs/swagger';
 import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guard.js';
-import { CloudinaryService } from './cloudinary.service.js';
+import { StorageService } from './storage.service.js';
 import { UploadBase64Dto } from './dto/upload-base64.dto.js';
 
 @ApiTags('Upload')
 @Controller('upload')
 @UseGuards(OptionalJwtAuthGuard)
 export class UploadController {
-  constructor(private readonly cloudinaryService: CloudinaryService) {}
+  constructor(private readonly storageService: StorageService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Upload an image file to Cloudinary' })
+  @ApiOperation({ summary: 'Upload an image file to Google Cloud Storage' })
   @ApiConsumes('multipart/form-data')
   @ApiBearerAuth('access-token')
   @ApiQuery({
     name: 'folder',
     required: false,
     example: 'avatars',
-    description: 'Folder name in Cloudinary (e.g. avatars, coupons, merchants, categories)',
+    description: 'Folder name in GCS (e.g. avatars, coupons, merchants, categories)',
   })
   @ApiBody({
     schema: {
@@ -47,12 +47,12 @@ export class UploadController {
         file: {
           type: 'string',
           format: 'binary',
-          description: 'Image file to upload (JPEG, PNG, WebP, GIF)',
+          description: 'Image file to upload (JPEG, PNG, WebP, GIF, SVG)',
         },
         folder: {
           type: 'string',
           example: 'avatars',
-          description: 'Optional subfolder in Cloudinary',
+          description: 'Optional subfolder in GCS',
         },
       },
       required: ['file'],
@@ -82,31 +82,31 @@ export class UploadController {
     }
 
     const folder = bodyFolder || queryFolder || 'general';
-    return this.cloudinaryService.uploadFile(file, { folder });
+    return this.storageService.uploadFile(file, { folder });
   }
 
   @Post('base64')
-  @ApiOperation({ summary: 'Upload base64 encoded image or data URL to Cloudinary' })
+  @ApiOperation({ summary: 'Upload base64 encoded image or data URL to Google Cloud Storage' })
   @ApiBearerAuth('access-token')
   async uploadBase64(@Body() dto: UploadBase64Dto) {
-    return this.cloudinaryService.uploadBase64(dto.data, {
+    return this.storageService.uploadBase64(dto.data, {
       folder: dto.folder || 'general',
       publicId: dto.publicId,
     });
   }
 
   @Delete()
-  @ApiOperation({ summary: 'Delete an image from Cloudinary by public ID' })
+  @ApiOperation({ summary: 'Delete an image from Google Cloud Storage by public ID' })
   @ApiBearerAuth('access-token')
   @ApiQuery({
     name: 'publicId',
     required: true,
-    description: 'Cloudinary public ID (e.g. citydeals/avatars/sample)',
+    description: 'GCS object path/public ID (e.g. citydeals/avatars/sample.jpg)',
   })
   async deleteFile(@Query('publicId') publicId: string) {
     if (!publicId) {
       throw new BadRequestException('publicId query parameter is required');
     }
-    return this.cloudinaryService.deleteFile(publicId);
+    return this.storageService.deleteFile(publicId);
   }
 }
