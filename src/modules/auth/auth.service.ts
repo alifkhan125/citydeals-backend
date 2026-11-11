@@ -126,6 +126,7 @@ export class AuthService {
         audience: [
           this.configService.get('GOOGLE_WEB_CLIENT_ID') || '',
           this.configService.get('GOOGLE_ANDROID_CLIENT_ID') || '',
+          this.configService.get('GOOGLE_IOS_CLIENT_ID') || '',
         ].filter(Boolean),
       });
       const payload = ticket.getPayload();
