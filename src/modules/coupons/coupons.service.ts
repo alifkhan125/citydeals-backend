@@ -592,11 +592,27 @@ export class CouponsService implements OnModuleInit {
         this.prisma.couponRedemption.findFirst({ where: { userId, couponId: id }, orderBy: { createdAt: 'desc' } }),
       ]);
       isSaved = !!saved;
-      isRedeemed = !!redeemed;
       redeemedAt = redeemed?.createdAt ?? null;
 
       if (redeemed) {
-        redemptionAvailableAt = nextRedemptionAt(coupon.redemptionFrequency, redeemed.createdAt);
+        if (coupon.redemptionFrequency === 'ONE_TIME') {
+          isRedeemed = true;
+          redemptionAvailableAt = null;
+        } else if (coupon.redemptionFrequency === 'UNLIMITED') {
+          isRedeemed = false;
+          redemptionAvailableAt = null;
+        } else {
+          const nextAt = nextRedemptionAt(coupon.redemptionFrequency, redeemed.createdAt);
+          if (nextAt && new Date() < nextAt) {
+            // Still in cooldown period
+            isRedeemed = true;
+            redemptionAvailableAt = nextAt;
+          } else {
+            // Cooldown has expired! User can redeem again
+            isRedeemed = false;
+            redemptionAvailableAt = null;
+          }
+        }
       }
     }
 
