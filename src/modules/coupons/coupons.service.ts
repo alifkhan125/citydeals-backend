@@ -52,7 +52,7 @@ export class CouponsService implements OnModuleInit {
         title: dto.title,
         description: dto.description,
         imageUrl: dto.imageUrl,
-        couponCode: dto.couponCode,
+        couponCode: dto.couponCode ? dto.couponCode.trim().toUpperCase() : undefined,
         couponLink: dto.couponLink,
         redemptionLimit: dto.redemptionLimit,
         redemptionFrequency: dto.redemptionFrequency,
@@ -532,6 +532,9 @@ export class CouponsService implements OnModuleInit {
       startsAt: startsAt ? new Date(startsAt) : undefined,
       expiresAt: expiresAt ? new Date(expiresAt) : undefined,
     };
+    if (data.couponCode !== undefined) {
+      updateData.couponCode = data.couponCode ? data.couponCode.trim().toUpperCase() : null;
+    }
     if (merchantId) {
       const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
       if (!merchant) throw new NotFoundException('Merchant not found');
