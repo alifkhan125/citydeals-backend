@@ -91,7 +91,31 @@ export class LegalService {
   }
 
   async getPage(typeInput: string) {
+    const rawType = typeInput.trim().toLowerCase();
     const type = this.normalizeType(typeInput);
+
+    // First check LegalContent model
+    const contentRecord = await this.prisma.legalContent.findFirst({
+      where: {
+        OR: [
+          { type: rawType },
+          { type },
+          { type: rawType.replace(/_/g, '-') },
+        ],
+      },
+    });
+
+    if (contentRecord) {
+      return {
+        id: contentRecord.id,
+        type: contentRecord.type,
+        title: contentRecord.title,
+        content: contentRecord.content,
+        version: '1.0',
+        updatedAt: contentRecord.updatedAt,
+      };
+    }
+
     let doc = await this.prisma.legalDocument.findUnique({
       where: { type },
     });
@@ -107,21 +131,40 @@ export class LegalService {
       }
     }
 
-    return (
-      doc ?? {
-        id: 'default',
-        type,
-        title: type.replace(/_/g, ' '),
-        version: '1.0',
-        content: 'Content will be managed from the admin dashboard.',
-        updatedAt: new Date(),
-      }
-    );
+    if (doc) {
+      return doc;
+    }
+
+    return {
+      id: 'default',
+      type,
+      title: type.replace(/_/g, ' '),
+      version: '1.0',
+      content: 'Content will be managed from the admin dashboard.',
+      updatedAt: new Date(),
+    };
   }
 
   async upsertPage(typeInput: string, dto: UpsertLegalDto) {
+    const rawType = typeInput.trim().toLowerCase();
     const type = this.normalizeType(typeInput);
-    return this.prisma.legalDocument.upsert({
+
+    // Upsert into LegalContent as specified
+    const contentRecord = await this.prisma.legalContent.upsert({
+      where: { type: rawType },
+      update: {
+        title: dto.title,
+        content: dto.content,
+      },
+      create: {
+        type: rawType,
+        title: dto.title,
+        content: dto.content,
+      },
+    });
+
+    // Also sync to LegalDocument for backward compatibility
+    await this.prisma.legalDocument.upsert({
       where: { type },
       update: {
         title: dto.title,
@@ -135,5 +178,7 @@ export class LegalService {
         version: dto.version || '1.0',
       },
     });
+
+    return contentRecord;
   }
 }

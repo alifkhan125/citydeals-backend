@@ -273,6 +273,14 @@ model LegalDocument {
   updatedAt DateTime @updatedAt
 }
 
+model LegalContent {
+  id        String   @id @default(uuid())
+  type      String   @unique
+  title     String
+  content   String   @db.Text
+  updatedAt DateTime @updatedAt
+}
+
 model AppSetting {
   key       String   @id
   value     String
@@ -392,4 +400,14 @@ model BirthdayClaim {
   @@unique([userId, giftId, birthdayYear])
   @@index([giftId, status])
   @@index([userId, birthdayYear])
+}
+
+model RegistrationOtp {
+  id          String   @id @default(uuid())
+  email       String   @unique
+  otp         String
+  payloadJson String   @db.Text
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }

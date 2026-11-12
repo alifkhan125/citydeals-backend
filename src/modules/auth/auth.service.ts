@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import bcrypt from 'bcrypt';
@@ -23,6 +23,8 @@ const APPLE_JWKS = createRemoteJWKSet(new URL('https://appleid.apple.com/auth/ke
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
@@ -37,69 +39,129 @@ export class AuthService {
       throw new BadRequestException('Terms and conditions must be accepted');
     }
 
-    const existingUser = await this.prisma.user.findUnique({ where: { email: dto.email } });
-    if (existingUser) {
-      if (existingUser.status === 'DELETED') {
-        const area = dto.latitude && dto.longitude
-          ? await this.areasService.resolveArea(dto.latitude, dto.longitude)
-          : null;
-        const restoredUser = await this.prisma.user.update({
-          where: { id: existingUser.id },
-          data: {
-            fullName: dto.fullName,
-            email: dto.email,
-            phoneNumber: dto.phoneNumber,
-            profilePictureUrl: dto.profilePictureUrl,
-            dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : null,
-            passwordHash: await bcrypt.hash(dto.password, 12),
-            role: dto.role ?? existingUser.role,
-            preferredLanguage: dto.preferredLanguage ?? existingUser.preferredLanguage,
-            acceptedTerms: dto.acceptedTerms,
-            onboardingCompleted: dto.onboardingCompleted ?? true,
-            notificationsPaused: dto.notificationsPaused ?? false,
-            areaId: area?.id ?? null,
-            latitude: dto.latitude ?? null,
-            longitude: dto.longitude ?? null,
-            status: 'ACTIVE',
-            deletedAt: null,
-            fcmToken: null,
-            refreshTokenHash: null,
-            resetPasswordOtp: null,
-            resetPasswordExpiresAt: null,
-          },
-          include: {
-            area: {
-              select: {
-                id: true, name: true, slug: true, city: true, state: true,
-                latitude: true, longitude: true,
-              },
-            },
-          },
-        });
-        return this.issueTokens(restoredUser);
-      }
+    const email = dto.email.trim().toLowerCase();
+    const existingUser = await this.prisma.user.findUnique({ where: { email } });
+    if (existingUser && existingUser.status !== 'DELETED') {
       throw new ConflictException('Email is already registered');
     }
 
-    const area = dto.latitude && dto.longitude
-      ? await this.areasService.resolveArea(dto.latitude, dto.longitude)
+    // Generate 6-digit verification code
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    // Store in RegistrationOtp table
+    await this.prisma.registrationOtp.upsert({
+      where: { email },
+      update: {
+        otp,
+        payloadJson: JSON.stringify(dto),
+        expiresAt,
+      },
+      create: {
+        email,
+        otp,
+        payloadJson: JSON.stringify(dto),
+        expiresAt,
+      },
+    });
+
+    this.logger.log(`[AUTH] ✉️ Signup verification OTP for ${email}: ${otp}`);
+    await this.mailService.sendRegistrationOtp(email, otp, dto.fullName);
+
+    return {
+      requireOtp: true,
+      email,
+      message: 'A 6-digit verification code has been sent to your email.',
+      ...(process.env.NODE_ENV !== 'production' ? { otp } : {}),
+    };
+  }
+
+  async verifyRegisterOtp(dto: { email: string; otp: string }) {
+    const email = dto.email.trim().toLowerCase();
+    const record = await this.prisma.registrationOtp.findUnique({
+      where: { email },
+    });
+
+    if (!record) {
+      throw new BadRequestException('No pending registration found for this email.');
+    }
+
+    if (record.otp !== dto.otp.trim()) {
+      throw new BadRequestException('Invalid verification code.');
+    }
+
+    if (new Date() > record.expiresAt) {
+      throw new BadRequestException('Verification code has expired. Please sign up again.');
+    }
+
+    const registerPayload: RegisterDto = JSON.parse(record.payloadJson);
+
+    // Clean up OTP record
+    await this.prisma.registrationOtp.delete({
+      where: { email },
+    });
+
+    const existingUser = await this.prisma.user.findUnique({ where: { email } });
+    if (existingUser && existingUser.status === 'DELETED') {
+      const area = registerPayload.latitude && registerPayload.longitude
+        ? await this.areasService.resolveArea(registerPayload.latitude, registerPayload.longitude)
+        : null;
+      const restoredUser = await this.prisma.user.update({
+        where: { id: existingUser.id },
+        data: {
+          fullName: registerPayload.fullName,
+          email,
+          phoneNumber: registerPayload.phoneNumber,
+          profilePictureUrl: registerPayload.profilePictureUrl,
+          dateOfBirth: registerPayload.dateOfBirth ? new Date(registerPayload.dateOfBirth) : null,
+          passwordHash: await bcrypt.hash(registerPayload.password, 12),
+          role: registerPayload.role ?? existingUser.role,
+          preferredLanguage: registerPayload.preferredLanguage ?? existingUser.preferredLanguage,
+          acceptedTerms: registerPayload.acceptedTerms,
+          onboardingCompleted: registerPayload.onboardingCompleted ?? true,
+          notificationsPaused: registerPayload.notificationsPaused ?? false,
+          areaId: area?.id ?? null,
+          latitude: registerPayload.latitude ?? null,
+          longitude: registerPayload.longitude ?? null,
+          status: 'ACTIVE',
+          deletedAt: null,
+          fcmToken: null,
+          refreshTokenHash: null,
+          resetPasswordOtp: null,
+          resetPasswordExpiresAt: null,
+        },
+        include: {
+          area: {
+            select: {
+              id: true, name: true, slug: true, city: true, state: true,
+              latitude: true, longitude: true,
+            },
+          },
+        },
+      });
+      return this.issueTokens(restoredUser);
+    }
+
+    const area = registerPayload.latitude && registerPayload.longitude
+      ? await this.areasService.resolveArea(registerPayload.latitude, registerPayload.longitude)
       : null;
+
     const user = await this.prisma.user.create({
       data: {
-        fullName: dto.fullName,
-        email: dto.email,
-        phoneNumber: dto.phoneNumber,
-        profilePictureUrl: dto.profilePictureUrl,
-        dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : undefined,
-        passwordHash: await bcrypt.hash(dto.password, 12),
-        role: dto.role ?? 'USER',
-        preferredLanguage: dto.preferredLanguage ?? 'en',
-        acceptedTerms: dto.acceptedTerms,
-        onboardingCompleted: dto.onboardingCompleted ?? true,
-        notificationsPaused: dto.notificationsPaused ?? false,
+        fullName: registerPayload.fullName,
+        email,
+        phoneNumber: registerPayload.phoneNumber,
+        profilePictureUrl: registerPayload.profilePictureUrl,
+        dateOfBirth: registerPayload.dateOfBirth ? new Date(registerPayload.dateOfBirth) : undefined,
+        passwordHash: await bcrypt.hash(registerPayload.password, 12),
+        role: registerPayload.role ?? 'USER',
+        preferredLanguage: registerPayload.preferredLanguage ?? 'en',
+        acceptedTerms: registerPayload.acceptedTerms,
+        onboardingCompleted: registerPayload.onboardingCompleted ?? true,
+        notificationsPaused: registerPayload.notificationsPaused ?? false,
         areaId: area?.id,
-        latitude: dto.latitude,
-        longitude: dto.longitude,
+        latitude: registerPayload.latitude,
+        longitude: registerPayload.longitude,
       },
       include: {
         area: {
@@ -115,6 +177,7 @@ export class AuthService {
         },
       },
     });
+
     return this.issueTokens(user);
   }
 
@@ -601,6 +664,91 @@ export class AuthService {
     return { 
       user: { ...userWithoutSecrets, staffRoleKey },
       tokens: { accessToken, refreshToken } 
+    };
+  }
+
+  async requestDeletionOtp(dto: { email: string; password: string }) {
+    const email = dto.email.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user || user.status === 'DELETED') {
+      throw new UnauthorizedException('Invalid email or password.');
+    }
+
+    if (user.role === 'ADMIN') {
+      throw new BadRequestException('Admin accounts cannot be deleted through self-service portal.');
+    }
+
+    const isMatch = await bcrypt.compare(dto.password, user.passwordHash);
+    if (!isMatch) {
+      throw new UnauthorizedException('Invalid email or password.');
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        resetPasswordOtp: otp,
+        resetPasswordExpiresAt: expiresAt,
+      },
+    });
+
+    this.logger.log(`[AUTH] 🗑️ Account deletion OTP for ${user.email}: ${otp}`);
+    await this.mailService.sendAccountDeletionOtp(user.email, otp, user.fullName ?? undefined);
+
+    return {
+      success: true,
+      message: 'A 6-digit confirmation code has been sent to your email address.',
+      ...(process.env.NODE_ENV !== 'production' ? { otp } : {}),
+    };
+  }
+
+  async verifyAndDelete(dto: { email: string; otp: string }) {
+    const email = dto.email.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      include: {
+        savedCoupons: true,
+        couponRedemptions: true,
+        notificationEvents: true,
+        notifications: true,
+        supportTickets: true,
+        birthdayClaims: true,
+      },
+    });
+
+    if (!user || !user.resetPasswordOtp || !user.resetPasswordExpiresAt) {
+      throw new BadRequestException('No pending deletion request found for this email.');
+    }
+
+    if (user.resetPasswordOtp !== dto.otp) {
+      throw new BadRequestException('Invalid verification code. Please check and try again.');
+    }
+
+    if (new Date() > user.resetPasswordExpiresAt) {
+      throw new BadRequestException('Verification code has expired. Please request a new one.');
+    }
+
+    // Permanently remove all user-associated records and the user entity
+    await this.prisma.$transaction(async (tx) => {
+      await tx.savedCoupon.deleteMany({ where: { userId: user.id } });
+      await tx.couponRedemption.deleteMany({ where: { userId: user.id } });
+      await tx.notificationCooldown.deleteMany({ where: { userId: user.id } });
+      await tx.notification.deleteMany({ where: { userId: user.id } });
+      await tx.supportTicket.deleteMany({ where: { userId: user.id } });
+      await tx.birthdayClaim.deleteMany({ where: { userId: user.id } });
+
+      await tx.user.delete({ where: { id: user.id } });
+    });
+
+    return {
+      success: true,
+      deleted: true,
+      message: 'Your account and all associated data have been permanently deleted.',
     };
   }
 }

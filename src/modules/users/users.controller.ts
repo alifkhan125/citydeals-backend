@@ -41,6 +41,12 @@ export class UsersController {
     return this.usersService.softDeleteMe(user.id);
   }
 
+  @Delete('users/account')
+  @ApiOperation({ summary: 'In-app authenticated account deletion' })
+  deleteAccount(@GetUser() user: { id: string }) {
+    return this.usersService.softDeleteMe(user.id);
+  }
+
   @Post('me/avatar')
   @ApiOperation({ summary: 'Upload user profile avatar to Cloudinary' })
   @ApiConsumes('multipart/form-data')

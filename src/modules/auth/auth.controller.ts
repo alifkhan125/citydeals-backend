@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { GetUser } from '../../common/decorators/get-user.decorator.js';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
 import { AuthService } from './auth.service.js';
@@ -12,6 +12,7 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import { VerifyOtpDto } from './dto/verify-otp.dto.js';
 import { ResetPasswordDto } from './dto/reset-password.dto.js';
 import { AppleLoginDto } from './dto/apple-login.dto.js';
+import { RequestDeletionOtpDto, VerifyAndDeleteDto } from './dto/deletion.dto.js';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -28,6 +29,12 @@ export class AuthController {
   @Post('register')
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
+  }
+
+  @Post('verify-register-otp')
+  @ApiOperation({ summary: 'Verify 6-digit OTP to complete registration' })
+  verifyRegisterOtp(@Body() dto: VerifyOtpDto) {
+    return this.authService.verifyRegisterOtp(dto);
   }
 
   @Post('login')
@@ -91,6 +98,18 @@ export class AuthController {
   @Post('logout')
   logout(@GetUser() user: { id: string }) {
     return this.authService.logout(user.id);
+  }
+
+  @Post('request-deletion-otp')
+  @ApiOperation({ summary: 'Request OTP for web portal account deletion' })
+  requestDeletionOtp(@Body() dto: RequestDeletionOtpDto) {
+    return this.authService.requestDeletionOtp(dto);
+  }
+
+  @Post('verify-and-delete')
+  @ApiOperation({ summary: 'Verify OTP and permanently delete account' })
+  verifyAndDelete(@Body() dto: VerifyAndDeleteDto) {
+    return this.authService.verifyAndDelete(dto);
   }
 }
 
