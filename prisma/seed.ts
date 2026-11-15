@@ -41,11 +41,37 @@ async function main() {
     },
   });
 
-  console.log('Admin user seeded successfully!');
+  // Seed Reviewer / Test User (Normal USER role)
+  const reviewerEmail = process.env.SEED_REVIEWER_EMAIL || 'reviewer@citydeals.com';
+  const reviewerPassword = process.env.SEED_REVIEWER_PASSWORD || 'CityDeals@1234';
+  const reviewerPasswordHash = await bcrypt.hash(reviewerPassword, 12);
+
+  console.log(`Seeding reviewer test user (${reviewerEmail})...`);
+
+  const reviewer = await prisma.user.upsert({
+    where: { email: reviewerEmail },
+    update: {
+      role: 'USER',
+      status: 'ACTIVE',
+      passwordHash: reviewerPasswordHash,
+      onboardingCompleted: true,
+      acceptedTerms: true,
+    },
+    create: {
+      fullName: 'Google Reviewer',
+      email: reviewerEmail,
+      passwordHash: reviewerPasswordHash,
+      role: 'USER',
+      status: 'ACTIVE',
+      acceptedTerms: true,
+      onboardingCompleted: true,
+    },
+  });
+
+  console.log('Seed completed successfully!');
   console.log('--------------------------------------------------');
-  console.log(`Email:    ${admin.email}`);
-  console.log(`Password: ${adminPassword}`);
-  console.log(`Role:     ${admin.role}`);
+  console.log(`Admin User:    ${admin.email} / ${adminPassword} (ADMIN)`);
+  console.log(`Reviewer User: ${reviewer.email} / ${reviewerPassword} (USER)`);
   console.log('--------------------------------------------------');
 }
 
