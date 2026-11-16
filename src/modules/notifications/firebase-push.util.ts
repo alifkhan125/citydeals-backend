@@ -44,6 +44,58 @@ function stringifyData(data?: Record<string, unknown>) {
   );
 }
 
+export function isApnsToken(token?: string | null): boolean {
+  if (!token) return false;
+  return /^[0-9a-fA-F]{64,128}$/.test(token.trim());
+}
+
+export async function convertApnsToFcm(apnsToken: string, isSandbox = false): Promise<string | null> {
+  const serviceAccount = getServiceAccount();
+  if (!serviceAccount) return null;
+
+  try {
+    const cred = cert(serviceAccount);
+    const tokenObj = await cred.getAccessToken();
+    const accessToken = tokenObj?.access_token;
+    if (!accessToken) return null;
+
+    const res = await fetch('https://iid.googleapis.com/iid/v1:batchImport', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+        access_token_auth: 'true',
+      },
+      body: JSON.stringify({
+        application: process.env.APPLE_CLIENT_ID || 'ai.citydeals.app',
+        sandbox: isSandbox,
+        apns_tokens: [apnsToken.trim()],
+      }),
+    });
+
+    if (!res.ok) {
+      if (!isSandbox) {
+        return convertApnsToFcm(apnsToken, true);
+      }
+      return null;
+    }
+
+    const data = (await res.json()) as any;
+    const result = data?.results?.[0];
+    if (result?.status === 'OK' && result?.registration_token) {
+      return result.registration_token;
+    }
+
+    if (!isSandbox) {
+      return convertApnsToFcm(apnsToken, true);
+    }
+    return null;
+  } catch (err) {
+    console.warn('[FCM] APNs to FCM conversion error:', err);
+    return null;
+  }
+}
+
 export async function sendFirebasePushMessages(messages: FirebasePushMessage[]) {
   const messaging = getFirebaseMessaging();
   const validMessages = messages.filter((message) => message.token);
@@ -57,8 +109,20 @@ export async function sendFirebasePushMessages(messages: FirebasePushMessage[]) 
     };
   }
 
+  // Pre-process messages: convert native iOS APNs tokens to FCM registration tokens
+  const resolvedMessages = await Promise.all(
+    validMessages.map(async (message) => {
+      let token = message.token.trim();
+      if (isApnsToken(token)) {
+        const converted = await convertApnsToFcm(token);
+        if (converted) token = converted;
+      }
+      return { ...message, token };
+    }),
+  );
+
   const responses = await Promise.allSettled(
-    validMessages.map((message) =>
+    resolvedMessages.map((message) =>
       messaging.send({
         token: message.token,
         notification: {
@@ -75,9 +139,18 @@ export async function sendFirebasePushMessages(messages: FirebasePushMessage[]) 
           },
         },
         apns: {
+          headers: {
+            'apns-priority': '10',
+            'apns-push-type': 'alert',
+          },
           payload: {
             aps: {
+              alert: {
+                title: message.title,
+                body: message.body,
+              },
               sound: 'default',
+              badge: 1,
             },
           },
         },

@@ -18,6 +18,7 @@ import { AppleLoginDto } from './dto/apple-login.dto.js';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 import { NotificationsService } from '../notifications/notifications.service.js';
+import { isApnsToken, convertApnsToFcm } from '../notifications/firebase-push.util.js';
 
 const APPLE_JWKS = createRemoteJWKSet(new URL('https://appleid.apple.com/auth/keys'));
 
@@ -496,9 +497,20 @@ export class AuthService {
   }
 
   async syncPushToken(userId: string, fcmToken: string) {
+    let tokenToSave = fcmToken?.trim();
+    if (tokenToSave && isApnsToken(tokenToSave)) {
+      try {
+        const converted = await convertApnsToFcm(tokenToSave);
+        if (converted) {
+          tokenToSave = converted;
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to convert APNs token for user ${userId}: ${err}`);
+      }
+    }
     return this.prisma.user.update({
       where: { id: userId },
-      data: { fcmToken },
+      data: { fcmToken: tokenToSave },
       select: {
         id: true,
         fcmToken: true,
