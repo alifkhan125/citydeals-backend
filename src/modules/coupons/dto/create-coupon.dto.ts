@@ -6,12 +6,23 @@ export { CouponStatus };
 
 export enum CouponRedemptionFrequency {
   ONE_TIME = 'ONE_TIME',
+  HOURLY = 'HOURLY',
   DAILY = 'DAILY',
   WEEKLY = 'WEEKLY',
   UNLIMITED = 'UNLIMITED',
 }
 
+export enum CouponAudience {
+  ALL_USERS = 'ALL_USERS',
+  BIRTHDAY_USERS_ONLY = 'BIRTHDAY_USERS_ONLY',
+  ALL_USERS_AND_BIRTHDAY_GIFT = 'ALL_USERS_AND_BIRTHDAY_GIFT',
+}
+
 export class CreateCouponDto {
+  @ApiPropertyOptional({ enum: CouponAudience, default: CouponAudience.ALL_USERS })
+  @IsOptional()
+  @IsEnum(CouponAudience)
+  audience?: CouponAudience;
   @ApiPropertyOptional({ enum: CouponStatus, example: CouponStatus.ACTIVE })
   @IsOptional()
   @IsEnum(CouponStatus)

@@ -83,8 +83,19 @@ export class AdminController {
     return this.admin.shareAnalytics(user, areaId, search);
   }
 
+  @Get('coupons/:id/report')
+  @Roles('ADMIN', 'ADVERTISER')
+  couponReport(
+    @GetUser() user: { id: string; role: string; areaId?: string | null },
+    @Param('id') id: string,
+  ) {
+    return this.admin.couponReport(user, id);
+  }
+
   // ─── Users ────────────────────────────────────────────────────────────────
-  @Get('users') users() { return this.admin.users(); }
+  @Get('users') users(@Query('includeDeleted') includeDeleted?: string) {
+    return this.admin.users(includeDeleted === 'true');
+  }
   @Get('users/:id') user(@Param('id') id: string) { return this.admin.user(id); }
 
   @Patch('users/:id/status')

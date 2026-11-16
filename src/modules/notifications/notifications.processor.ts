@@ -2,7 +2,7 @@ import { Processor, WorkerHost } from '@nestjs/bullmq';
 import { Injectable } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { PrismaService } from '../../database/prisma.service.js';
-import { PROXIMITY_QUEUE } from './notifications.service.js';
+import { NotificationsService, PROXIMITY_QUEUE } from './notifications.service.js';
 import { SendNotificationDto } from './dto/send-notification.dto.js';
 import { sendExpoPushMessages } from './expo-push.util.js';
 import { sendFirebasePushMessages } from './firebase-push.util.js';
@@ -12,11 +12,18 @@ const COOLDOWN_MS = 12 * 60 * 60 * 1000; // 12 hours between proximity alerts
 @Injectable()
 @Processor(PROXIMITY_QUEUE)
 export class NotificationsProcessor extends WorkerHost {
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationsService: NotificationsService,
+  ) {
     super();
   }
 
   async process(job: Job<any>) {
+    if (job.name === 'send-scheduled-notification') {
+      return this.notificationsService.processScheduledNotification(job.data.dto);
+    }
+
     if (job.name === 'send-grouped-proximity') {
       return this.processGrouped(job);
     }

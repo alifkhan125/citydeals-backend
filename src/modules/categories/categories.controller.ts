@@ -10,6 +10,9 @@ import { OptionalJwtAuthGuard } from '../../common/guards/optional-jwt-auth.guar
 import { CategoriesService } from './categories.service.js';
 import { CreateCategoryDto } from './dto/create-category.dto.js';
 import { UpdateCategoryDto } from './dto/update-category.dto.js';
+import { AdminCategoryQueryDto } from './dto/admin-category-query.dto.js';
+import { BulkCategoryStatusDto } from '../../common/dto/bulk-category-status.dto.js';
+import { BulkIdsDto } from '../../common/dto/bulk-ids.dto.js';
 
 @ApiTags('Categories')
 @Controller('categories')
@@ -29,6 +32,33 @@ export class CategoriesController {
   @UseGuards(OptionalJwtAuthGuard)
   findAll(@GetUser() user?: { role?: string } | null) {
     return this.categoriesService.findAll(user);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, StaffPermissionGuard)
+  @ApiBearerAuth('access-token')
+  @Roles('ADMIN')
+  @RequirePermission('manage-coupon-categories')
+  @Get('admin')
+  findAdmin(@Query() query: AdminCategoryQueryDto) {
+    return this.categoriesService.findAdmin(query);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, StaffPermissionGuard)
+  @ApiBearerAuth('access-token')
+  @Roles('ADMIN')
+  @RequirePermission('manage-coupon-categories')
+  @Patch('admin/bulk-status')
+  bulkStatus(@Body() dto: BulkCategoryStatusDto) {
+    return this.categoriesService.bulkStatus(dto);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, StaffPermissionGuard)
+  @ApiBearerAuth('access-token')
+  @Roles('ADMIN')
+  @RequirePermission('delete-content')
+  @Delete('admin/bulk')
+  bulkDelete(@Body() dto: BulkIdsDto) {
+    return this.categoriesService.bulkDelete(dto.ids);
   }
 
   @Get(':slugOrId/coupons')

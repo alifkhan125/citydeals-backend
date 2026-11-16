@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import bcrypt from 'bcrypt';
@@ -14,11 +14,18 @@ import { VerifyOtpDto } from './dto/verify-otp.dto.js';
 import { ResetPasswordDto } from './dto/reset-password.dto.js';
 import { OAuth2Client } from 'google-auth-library';
 import { GoogleLoginDto } from './dto/google-login.dto.js';
+import { AppleLoginDto } from './dto/apple-login.dto.js';
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 
 import { NotificationsService } from '../notifications/notifications.service.js';
+import { isApnsToken, convertApnsToFcm } from '../notifications/firebase-push.util.js';
+
+const APPLE_JWKS = createRemoteJWKSet(new URL('https://appleid.apple.com/auth/keys'));
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
@@ -33,30 +40,129 @@ export class AuthService {
       throw new BadRequestException('Terms and conditions must be accepted');
     }
 
-    const existingUser = await this.prisma.user.findUnique({ where: { email: dto.email } });
-    if (existingUser) {
+    const email = dto.email.trim().toLowerCase();
+    const existingUser = await this.prisma.user.findUnique({ where: { email } });
+    if (existingUser && existingUser.status !== 'DELETED') {
       throw new ConflictException('Email is already registered');
     }
 
-    const area = dto.latitude && dto.longitude
-      ? await this.areasService.resolveArea(dto.latitude, dto.longitude)
+    // Generate 6-digit verification code
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    // Store in RegistrationOtp table
+    await this.prisma.registrationOtp.upsert({
+      where: { email },
+      update: {
+        otp,
+        payloadJson: JSON.stringify(dto),
+        expiresAt,
+      },
+      create: {
+        email,
+        otp,
+        payloadJson: JSON.stringify(dto),
+        expiresAt,
+      },
+    });
+
+    this.logger.log(`[AUTH] ✉️ Signup verification OTP for ${email}: ${otp}`);
+    await this.mailService.sendRegistrationOtp(email, otp, dto.fullName);
+
+    return {
+      requireOtp: true,
+      email,
+      message: 'A 6-digit verification code has been sent to your email.',
+      ...(process.env.NODE_ENV !== 'production' ? { otp } : {}),
+    };
+  }
+
+  async verifyRegisterOtp(dto: { email: string; otp: string }) {
+    const email = dto.email.trim().toLowerCase();
+    const record = await this.prisma.registrationOtp.findUnique({
+      where: { email },
+    });
+
+    if (!record) {
+      throw new BadRequestException('No pending registration found for this email.');
+    }
+
+    if (record.otp !== dto.otp.trim()) {
+      throw new BadRequestException('Invalid verification code.');
+    }
+
+    if (new Date() > record.expiresAt) {
+      throw new BadRequestException('Verification code has expired. Please sign up again.');
+    }
+
+    const registerPayload: RegisterDto = JSON.parse(record.payloadJson);
+
+    // Clean up OTP record
+    await this.prisma.registrationOtp.delete({
+      where: { email },
+    });
+
+    const existingUser = await this.prisma.user.findUnique({ where: { email } });
+    if (existingUser && existingUser.status === 'DELETED') {
+      const area = registerPayload.latitude && registerPayload.longitude
+        ? await this.areasService.resolveArea(registerPayload.latitude, registerPayload.longitude)
+        : null;
+      const restoredUser = await this.prisma.user.update({
+        where: { id: existingUser.id },
+        data: {
+          fullName: registerPayload.fullName,
+          email,
+          phoneNumber: registerPayload.phoneNumber,
+          profilePictureUrl: registerPayload.profilePictureUrl,
+          dateOfBirth: registerPayload.dateOfBirth ? new Date(registerPayload.dateOfBirth) : null,
+          passwordHash: await bcrypt.hash(registerPayload.password, 12),
+          role: registerPayload.role ?? existingUser.role,
+          preferredLanguage: registerPayload.preferredLanguage ?? existingUser.preferredLanguage,
+          acceptedTerms: registerPayload.acceptedTerms,
+          onboardingCompleted: registerPayload.onboardingCompleted ?? true,
+          notificationsPaused: registerPayload.notificationsPaused ?? false,
+          areaId: area?.id ?? null,
+          latitude: registerPayload.latitude ?? null,
+          longitude: registerPayload.longitude ?? null,
+          status: 'ACTIVE',
+          deletedAt: null,
+          fcmToken: null,
+          refreshTokenHash: null,
+          resetPasswordOtp: null,
+          resetPasswordExpiresAt: null,
+        },
+        include: {
+          area: {
+            select: {
+              id: true, name: true, slug: true, city: true, state: true,
+              latitude: true, longitude: true,
+            },
+          },
+        },
+      });
+      return this.issueTokens(restoredUser);
+    }
+
+    const area = registerPayload.latitude && registerPayload.longitude
+      ? await this.areasService.resolveArea(registerPayload.latitude, registerPayload.longitude)
       : null;
+
     const user = await this.prisma.user.create({
       data: {
-        fullName: dto.fullName,
-        email: dto.email,
-        phoneNumber: dto.phoneNumber,
-        profilePictureUrl: dto.profilePictureUrl,
-        dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : undefined,
-        passwordHash: await bcrypt.hash(dto.password, 12),
-        role: dto.role ?? 'USER',
-        preferredLanguage: dto.preferredLanguage ?? 'en',
-        acceptedTerms: dto.acceptedTerms,
-        onboardingCompleted: dto.onboardingCompleted ?? true,
-        notificationsPaused: dto.notificationsPaused ?? false,
+        fullName: registerPayload.fullName,
+        email,
+        phoneNumber: registerPayload.phoneNumber,
+        profilePictureUrl: registerPayload.profilePictureUrl,
+        dateOfBirth: registerPayload.dateOfBirth ? new Date(registerPayload.dateOfBirth) : undefined,
+        passwordHash: await bcrypt.hash(registerPayload.password, 12),
+        role: registerPayload.role ?? 'USER',
+        preferredLanguage: registerPayload.preferredLanguage ?? 'en',
+        acceptedTerms: registerPayload.acceptedTerms,
+        onboardingCompleted: registerPayload.onboardingCompleted ?? true,
+        notificationsPaused: registerPayload.notificationsPaused ?? false,
         areaId: area?.id,
-        latitude: dto.latitude,
-        longitude: dto.longitude,
+        latitude: registerPayload.latitude,
+        longitude: registerPayload.longitude,
       },
       include: {
         area: {
@@ -72,18 +178,23 @@ export class AuthService {
         },
       },
     });
+
     return this.issueTokens(user);
   }
 
   async googleLogin(dto: GoogleLoginDto) {
     const client = new OAuth2Client(this.configService.get('GOOGLE_CLIENT_ID'));
     try {
+      const splitIds = (val?: string) => (val || '').split(',').map((s) => s.trim()).filter(Boolean);
+      const audience = [
+        ...splitIds(this.configService.get('GOOGLE_WEB_CLIENT_ID')),
+        ...splitIds(this.configService.get('GOOGLE_ANDROID_CLIENT_ID')),
+        ...splitIds(this.configService.get('GOOGLE_IOS_CLIENT_ID')),
+      ];
+
       const ticket = await client.verifyIdToken({
         idToken: dto.idToken,
-        audience: [
-          this.configService.get('GOOGLE_WEB_CLIENT_ID') || '',
-          this.configService.get('GOOGLE_ANDROID_CLIENT_ID') || '',
-        ].filter(Boolean),
+        audience,
       });
       const payload = ticket.getPayload();
       
@@ -119,11 +230,96 @@ export class AuthService {
             },
           },
         });
+      } else if (user.status === 'DELETED') {
+        user = await this.prisma.user.update({
+          where: { id: user.id },
+          data: {
+            fullName: payload.name || user.fullName,
+            profilePictureUrl: payload.picture || user.profilePictureUrl,
+            status: 'ACTIVE',
+            deletedAt: null,
+            fcmToken: null,
+            refreshTokenHash: null,
+          },
+          include: {
+            area: {
+              select: { id: true, name: true, slug: true, city: true, state: true, latitude: true, longitude: true },
+            },
+          },
+        });
       }
 
       return this.issueTokens(user);
     } catch (error) {
       throw new UnauthorizedException('Invalid Google token');
+    }
+  }
+
+  async appleLogin(dto: AppleLoginDto) {
+    try {
+      const audience = this.configService.get<string>('APPLE_CLIENT_ID') || 'ai.citydeals.app';
+      const { payload } = await jwtVerify(dto.identityToken, APPLE_JWKS, {
+        issuer: 'https://appleid.apple.com',
+        audience,
+      });
+
+      const appleSubject = typeof payload.sub === 'string' ? payload.sub : null;
+      const tokenEmail = typeof payload.email === 'string' ? payload.email : undefined;
+      const email = tokenEmail || dto.email;
+      if (!appleSubject) throw new UnauthorizedException('Invalid Apple token');
+
+      let user = await this.prisma.user.findUnique({
+        where: { appleSubject },
+        include: { area: { select: { id: true, name: true, slug: true, city: true, state: true, latitude: true, longitude: true } } },
+      });
+
+      if (!user && email) {
+        user = await this.prisma.user.findUnique({
+          where: { email: email.toLowerCase() },
+          include: { area: { select: { id: true, name: true, slug: true, city: true, state: true, latitude: true, longitude: true } } },
+        });
+      }
+
+      if (!user && !email) {
+        throw new BadRequestException('Apple did not provide an email. Please sign in again.');
+      }
+
+      const displayName = dto.fullName || 'Apple User';
+      if (!user) {
+        user = await this.prisma.user.create({
+          data: {
+            fullName: displayName,
+            email: email!,
+            appleSubject,
+            passwordHash: await bcrypt.hash(Math.random().toString(36).slice(-10), 12),
+            role: 'USER',
+            preferredLanguage: 'en',
+            acceptedTerms: true,
+            onboardingCompleted: true,
+          },
+          include: { area: { select: { id: true, name: true, slug: true, city: true, state: true, latitude: true, longitude: true } } },
+        });
+      } else {
+        if (user.status === 'BANNED') throw new ForbiddenException('This user is banned');
+        if (user.status === 'SUSPENDED') throw new ForbiddenException('This user is suspended');
+
+        user = await this.prisma.user.update({
+          where: { id: user.id },
+          data: {
+            appleSubject: user.appleSubject || appleSubject,
+            ...(user.status === 'DELETED'
+              ? { status: 'ACTIVE', deletedAt: null, fcmToken: null, refreshTokenHash: null }
+              : {}),
+            ...(user.fullName ? {} : { fullName: displayName }),
+          },
+          include: { area: { select: { id: true, name: true, slug: true, city: true, state: true, latitude: true, longitude: true } } },
+        });
+      }
+
+      return this.issueTokens(user);
+    } catch (error) {
+      if (error instanceof BadRequestException || error instanceof ForbiddenException) throw error;
+      throw new UnauthorizedException('Invalid Apple token');
     }
   }
 
@@ -149,6 +345,7 @@ export class AuthService {
     }
     if (user.status === 'BANNED') throw new ForbiddenException('This user is banned');
     if (user.status === 'SUSPENDED') throw new ForbiddenException('This user is suspended');
+    if (user.status === 'DELETED') throw new ForbiddenException('This account has been deleted');
 
     // If ADMIN role, look up their StaffAccount to get the roleKey for permission checks
     let staffRoleKey: string | undefined;
@@ -227,12 +424,24 @@ export class AuthService {
 
   async syncLocation(userId: string, dto: SyncLocationDto) {
     const area = await this.areasService.resolveArea(dto.latitude, dto.longitude);
+    let tokenToSave = dto.fcmToken?.trim();
+    if (tokenToSave && isApnsToken(tokenToSave)) {
+      try {
+        const converted = await convertApnsToFcm(tokenToSave);
+        if (converted) {
+          tokenToSave = converted;
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to convert APNs token in syncLocation for user ${userId}: ${err}`);
+      }
+    }
+
     const updatedUser = await this.prisma.user.update({
       where: { id: userId },
       data: {
         latitude: dto.latitude,
         longitude: dto.longitude,
-        fcmToken: dto.fcmToken,
+        ...(tokenToSave ? { fcmToken: tokenToSave } : {}),
         areaId: area?.id,
       },
       select: {
@@ -299,10 +508,26 @@ export class AuthService {
     return updatedUser;
   }
 
-  async syncPushToken(userId: string, fcmToken: string) {
+  async syncPushToken(userId: string, fcmToken: string, isSandbox?: boolean) {
+    let tokenToSave = fcmToken?.trim();
+    if (tokenToSave && isApnsToken(tokenToSave)) {
+      try {
+        const useSandbox = isSandbox ?? (process.env.NODE_ENV !== 'production' || process.env.APNS_SANDBOX === 'true');
+        let converted = await convertApnsToFcm(tokenToSave, useSandbox);
+        if (!converted) {
+          converted = await convertApnsToFcm(tokenToSave, !useSandbox);
+        }
+        if (converted) {
+          this.logger.log(`[Push] User ${userId} APNs token successfully converted to FCM token (sandbox=${useSandbox})`);
+          tokenToSave = converted;
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to convert APNs token for user ${userId}: ${err}`);
+      }
+    }
     return this.prisma.user.update({
       where: { id: userId },
-      data: { fcmToken },
+      data: { fcmToken: tokenToSave },
       select: {
         id: true,
         fcmToken: true,
@@ -471,6 +696,91 @@ export class AuthService {
     return { 
       user: { ...userWithoutSecrets, staffRoleKey },
       tokens: { accessToken, refreshToken } 
+    };
+  }
+
+  async requestDeletionOtp(dto: { email: string; password: string }) {
+    const email = dto.email.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user || user.status === 'DELETED') {
+      throw new UnauthorizedException('Invalid email or password.');
+    }
+
+    if (user.role === 'ADMIN') {
+      throw new BadRequestException('Admin accounts cannot be deleted through self-service portal.');
+    }
+
+    const isMatch = await bcrypt.compare(dto.password, user.passwordHash);
+    if (!isMatch) {
+      throw new UnauthorizedException('Invalid email or password.');
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: {
+        resetPasswordOtp: otp,
+        resetPasswordExpiresAt: expiresAt,
+      },
+    });
+
+    this.logger.log(`[AUTH] 🗑️ Account deletion OTP for ${user.email}: ${otp}`);
+    await this.mailService.sendAccountDeletionOtp(user.email, otp, user.fullName ?? undefined);
+
+    return {
+      success: true,
+      message: 'A 6-digit confirmation code has been sent to your email address.',
+      ...(process.env.NODE_ENV !== 'production' ? { otp } : {}),
+    };
+  }
+
+  async verifyAndDelete(dto: { email: string; otp: string }) {
+    const email = dto.email.trim().toLowerCase();
+    const user = await this.prisma.user.findUnique({
+      where: { email },
+      include: {
+        savedCoupons: true,
+        couponRedemptions: true,
+        notificationEvents: true,
+        notifications: true,
+        supportTickets: true,
+        birthdayClaims: true,
+      },
+    });
+
+    if (!user || !user.resetPasswordOtp || !user.resetPasswordExpiresAt) {
+      throw new BadRequestException('No pending deletion request found for this email.');
+    }
+
+    if (user.resetPasswordOtp !== dto.otp) {
+      throw new BadRequestException('Invalid verification code. Please check and try again.');
+    }
+
+    if (new Date() > user.resetPasswordExpiresAt) {
+      throw new BadRequestException('Verification code has expired. Please request a new one.');
+    }
+
+    // Permanently remove all user-associated records and the user entity
+    await this.prisma.$transaction(async (tx) => {
+      await tx.savedCoupon.deleteMany({ where: { userId: user.id } });
+      await tx.couponRedemption.deleteMany({ where: { userId: user.id } });
+      await tx.notificationCooldown.deleteMany({ where: { userId: user.id } });
+      await tx.notification.deleteMany({ where: { userId: user.id } });
+      await tx.supportTicket.deleteMany({ where: { userId: user.id } });
+      await tx.birthdayClaim.deleteMany({ where: { userId: user.id } });
+
+      await tx.user.delete({ where: { id: user.id } });
+    });
+
+    return {
+      success: true,
+      deleted: true,
+      message: 'Your account and all associated data have been permanently deleted.',
     };
   }
 }

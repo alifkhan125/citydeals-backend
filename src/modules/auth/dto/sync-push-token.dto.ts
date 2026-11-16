@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsString } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsBoolean, IsOptional, IsString } from 'class-validator';
 
 export class SyncPushTokenDto {
   @ApiProperty({
@@ -8,4 +8,11 @@ export class SyncPushTokenDto {
   })
   @IsString()
   fcmToken!: string;
+
+  @ApiPropertyOptional({
+    description: 'Whether the iOS device is in development / sandbox mode',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isSandbox?: boolean;
 }

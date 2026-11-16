@@ -116,6 +116,43 @@ export class UsersService {
     });
   }
 
+  async softDeleteMe(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, role: true, status: true },
+    });
+
+    if (!user) throw new NotFoundException('User not found');
+    if (user.status === 'DELETED') {
+      return { deleted: true, message: 'Account already deleted' };
+    }
+    if (user.role === 'ADMIN') {
+      throw new NotFoundException('User not found');
+    }
+
+    const deletedAt = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      // Keep the complete user record for restore/history. Only access and
+      // short-lived/security/device credentials are invalidated.
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          status: 'DELETED',
+          deletedAt,
+          fcmToken: null,
+          refreshTokenHash: null,
+          resetPasswordOtp: null,
+          resetPasswordExpiresAt: null,
+        },
+      });
+    });
+
+    return {
+      deleted: true,
+      message: 'Your account and personal information have been deleted.',
+    };
+  }
+
   private async ensureUser(userId: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true } });
     if (!user) throw new NotFoundException('User not found');

@@ -4,6 +4,7 @@ import { PrismaService } from '../../database/prisma.service.js';
 import { QrService } from '../qr/qr.service.js';
 import { CreateAreaDto } from './dto/create-area.dto.js';
 import { UpdateAreaDto } from './dto/update-area.dto.js';
+import { AdminAreaQueryDto } from './dto/admin-area-query.dto.js';
 
 @Injectable()
 export class AreasService {
@@ -55,6 +56,53 @@ export class AreasService {
       },
       orderBy: { name: 'asc' },
     });
+  }
+
+  async findAdmin(query: AdminAreaQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 25;
+    const search = query.search?.trim();
+    const where: any = {
+      isDeleted: false,
+      ...(query.city ? { city: { contains: query.city.trim(), mode: 'insensitive' } } : {}),
+      ...(query.state ? { state: { contains: query.state.trim(), mode: 'insensitive' } } : {}),
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: 'insensitive' } },
+              { slug: { contains: search, mode: 'insensitive' } },
+              { city: { contains: search, mode: 'insensitive' } },
+              { state: { contains: search, mode: 'insensitive' } },
+            ],
+          }
+        : {}),
+    };
+
+    if (query.idsOnly === 'true') {
+      const ids = await this.prisma.area.findMany({ where, select: { id: true } });
+      return { ids: ids.map((item) => item.id) };
+    }
+
+    const [items, total] = await Promise.all([
+      this.prisma.area.findMany({
+        where,
+        include: { _count: { select: { merchants: true, coupons: true } } },
+        orderBy: { name: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.area.count({ where }),
+    ]);
+
+    return { items, meta: { page, limit, total, totalPages: Math.ceil(total / limit) } };
+  }
+
+  async bulkDelete(ids: string[]) {
+    const result = await this.prisma.area.updateMany({
+      where: { id: { in: ids }, isDeleted: false },
+      data: { isDeleted: true },
+    });
+    return { deleted: result.count, softDeleted: true };
   }
 
   async findBySlug(slug: string) {

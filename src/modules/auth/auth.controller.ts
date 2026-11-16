@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { GetUser } from '../../common/decorators/get-user.decorator.js';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard.js';
 import { AuthService } from './auth.service.js';
@@ -11,6 +11,8 @@ import { ChangePasswordDto } from './dto/change-password.dto.js';
 import { ForgotPasswordDto } from './dto/forgot-password.dto.js';
 import { VerifyOtpDto } from './dto/verify-otp.dto.js';
 import { ResetPasswordDto } from './dto/reset-password.dto.js';
+import { AppleLoginDto } from './dto/apple-login.dto.js';
+import { RequestDeletionOtpDto, VerifyAndDeleteDto } from './dto/deletion.dto.js';
 
 @ApiTags('Auth')
 @Controller('auth')
@@ -29,6 +31,12 @@ export class AuthController {
     return this.authService.register(dto);
   }
 
+  @Post('verify-register-otp')
+  @ApiOperation({ summary: 'Verify 6-digit OTP to complete registration' })
+  verifyRegisterOtp(@Body() dto: VerifyOtpDto) {
+    return this.authService.verifyRegisterOtp(dto);
+  }
+
   @Post('login')
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
@@ -37,6 +45,11 @@ export class AuthController {
   @Post('google')
   googleLogin(@Body() dto: import('./dto/google-login.dto.js').GoogleLoginDto) {
     return this.authService.googleLogin(dto);
+  }
+
+  @Post('apple')
+  appleLogin(@Body() dto: AppleLoginDto) {
+    return this.authService.appleLogin(dto);
   }
 
   @Post('forgot-password')
@@ -65,7 +78,7 @@ export class AuthController {
   @ApiBearerAuth('access-token')
   @Post('push-token/sync')
   syncPushToken(@GetUser() user: { id: string }, @Body() dto: SyncPushTokenDto) {
-    return this.authService.syncPushToken(user.id, dto.fcmToken);
+    return this.authService.syncPushToken(user.id, dto.fcmToken, dto.isSandbox);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -85,6 +98,18 @@ export class AuthController {
   @Post('logout')
   logout(@GetUser() user: { id: string }) {
     return this.authService.logout(user.id);
+  }
+
+  @Post('request-deletion-otp')
+  @ApiOperation({ summary: 'Request OTP for web portal account deletion' })
+  requestDeletionOtp(@Body() dto: RequestDeletionOtpDto) {
+    return this.authService.requestDeletionOtp(dto);
+  }
+
+  @Post('verify-and-delete')
+  @ApiOperation({ summary: 'Verify OTP and permanently delete account' })
+  verifyAndDelete(@Body() dto: VerifyAndDeleteDto) {
+    return this.authService.verifyAndDelete(dto);
   }
 }
 

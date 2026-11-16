@@ -1,19 +1,45 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, OnModuleInit } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../database/prisma.service.js';
 import { CreateCouponDto } from './dto/create-coupon.dto.js';
 import { FilterCouponDto } from './dto/filter-coupon.dto.js';
 import { UpdateCouponDto } from './dto/update-coupon.dto.js';
+import { AdminCouponQueryDto } from './dto/admin-coupon-query.dto.js';
 import { haversineDistanceMeters } from '../../common/utils/geo.util.js';
 
 import { NotificationsService } from '../notifications/notifications.service.js';
+import { nextRedemptionAt } from './redemption-policy.js';
+import { csvRecords } from '../../common/utils/csv.util.js';
 
 @Injectable()
-export class CouponsService {
+export class CouponsService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
   ) {}
+
+  onModuleInit() {
+    // Keep expired coupons out of the published catalog even when no admin opens the dashboard.
+    void this.archiveExpiredCoupons();
+    setInterval(() => {
+      void this.archiveExpiredCoupons();
+    }, 5 * 60 * 1000);
+  }
+
+  private async archiveExpiredCoupons() {
+    const expired = await this.prisma.coupon.findMany({
+      where: { status: 'ACTIVE', isDeleted: false, expiresAt: { lt: new Date() } },
+      select: { id: true },
+    });
+    if (!expired.length) return { archived: 0 };
+
+    await this.prisma.coupon.updateMany({
+      where: { id: { in: expired.map((coupon) => coupon.id) } },
+      data: { status: 'ARCHIVED' },
+    });
+    await Promise.all(expired.map((coupon) => this.syncBirthdayGift(coupon.id)));
+    return { archived: expired.length };
+  }
 
   async create(user: { role: string; areaId?: string | null }, dto: CreateCouponDto) {
     const merchant = await this.prisma.merchant.findUnique({ where: { id: dto.merchantId } });
@@ -21,12 +47,12 @@ export class CouponsService {
     if (user.role !== 'ADMIN' && merchant.areaId !== user.areaId) {
       throw new ForbiddenException('Cannot create coupons outside your area');
     }
-    return this.prisma.coupon.create({
+    const coupon = await this.prisma.coupon.create({
       data: {
         title: dto.title,
         description: dto.description,
         imageUrl: dto.imageUrl,
-        couponCode: dto.couponCode,
+        couponCode: dto.couponCode ? dto.couponCode.trim().toUpperCase() : undefined,
         couponLink: dto.couponLink,
         redemptionLimit: dto.redemptionLimit,
         redemptionFrequency: dto.redemptionFrequency,
@@ -37,11 +63,205 @@ export class CouponsService {
         categoryId: dto.categoryId,
         isWhitelisted: dto.isWhitelisted ?? false,
         shareSlug: randomUUID(),
-        status: dto.status ?? 'ARCHIVED',
+        status: dto.status ?? 'ACTIVE',
+        audience: dto.audience ?? 'ALL_USERS',
         startsAt: dto.startsAt ? new Date(dto.startsAt) : undefined,
         expiresAt: dto.expiresAt ? new Date(dto.expiresAt) : undefined,
       },
     });
+    await this.syncBirthdayGift(coupon.id);
+    return coupon;
+  }
+
+  private async syncBirthdayGift(couponId: string) {
+    const coupon = await this.prisma.coupon.findUnique({
+      where: { id: couponId },
+      include: { merchant: { include: { category: true } }, category: true },
+    });
+    if (!coupon) return;
+    const existing = await this.prisma.birthdayGift.findFirst({ where: { couponId } });
+    if (coupon.audience === 'ALL_USERS') {
+      if (existing) await this.prisma.birthdayGift.update({ where: { id: existing.id }, data: { status: 'INACTIVE' } });
+      return;
+    }
+    const data = {
+      title: coupon.title,
+      description: coupon.description,
+      terms: coupon.terms,
+      imageUrl: coupon.imageUrl,
+      category: coupon.category?.name ?? coupon.merchant.category?.name ?? null,
+      merchantId: coupon.merchantId,
+      couponId: coupon.id,
+      status: coupon.status === 'ACTIVE' && !coupon.isDeleted ? 'ACTIVE' as const : 'INACTIVE' as const,
+      startsAt: coupon.startsAt,
+      expiresAt: coupon.expiresAt,
+    };
+    if (existing) await this.prisma.birthdayGift.update({ where: { id: existing.id }, data });
+    else await this.prisma.birthdayGift.create({ data });
+  }
+
+  async findAdmin(query: AdminCouponQueryDto) {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 25;
+    const search = query.search?.trim();
+    const where: any = {
+      isDeleted: false,
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.audience ? { audience: query.audience } : {}),
+      ...(query.areaId ? { areaId: query.areaId } : {}),
+      ...(query.merchantId ? { merchantId: query.merchantId } : {}),
+      ...(query.categoryId ? { categoryId: query.categoryId } : {}),
+      ...(search
+        ? {
+            OR: [
+              { title: { contains: search, mode: 'insensitive' } },
+              { description: { contains: search, mode: 'insensitive' } },
+              { couponCode: { contains: search, mode: 'insensitive' } },
+              { merchant: { name: { contains: search, mode: 'insensitive' } } },
+            ],
+          }
+        : {}),
+    };
+
+    if (query.idsOnly === 'true') {
+      const ids = await this.prisma.coupon.findMany({ where, select: { id: true } });
+      return { ids: ids.map((item) => item.id) };
+    }
+
+    const [items, total] = await Promise.all([
+      this.prisma.coupon.findMany({
+        where,
+        include: {
+          merchant: true,
+          area: true,
+          category: true,
+          _count: {
+            select: {
+              savedBy: true,
+              redemptions: true,
+              viewEvents: true,
+            },
+          },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      this.prisma.coupon.count({ where }),
+    ]);
+
+    return {
+      items: items.map((coupon: any) => ({
+        ...coupon,
+        likes: coupon._count?.savedBy ?? 0,
+        redemptions: coupon._count?.redemptions ?? 0,
+        views: coupon._count?.viewEvents ?? 0,
+        _count: undefined,
+      })),
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
+  }
+
+  async bulkStatus(dto: { ids: string[]; status: any }) {
+    const result = await this.prisma.coupon.updateMany({
+      where: { id: { in: dto.ids }, isDeleted: false },
+      data: { status: dto.status },
+    });
+    await Promise.all(dto.ids.map((id) => this.syncBirthdayGift(id)));
+    return { updated: result.count };
+  }
+
+  async bulkDelete(ids: string[]) {
+    const result = await this.prisma.coupon.updateMany({
+      where: { id: { in: ids }, isDeleted: false },
+      data: { isDeleted: true, status: 'ARCHIVED' },
+    });
+    await Promise.all(ids.map((id) => this.syncBirthdayGift(id)));
+    return { deleted: result.count, softDeleted: true };
+  }
+
+  async duplicate(id: string) {
+    const source = await this.prisma.coupon.findFirst({ where: { id, isDeleted: false } });
+    if (!source) throw new NotFoundException('Coupon not found');
+
+    const duplicate = await this.prisma.coupon.create({
+      data: {
+        title: `${source.title} (Copy)`,
+        description: source.description,
+        imageUrl: source.imageUrl,
+        couponCode: source.couponCode,
+        couponLink: source.couponLink,
+        redemptionLimit: source.redemptionLimit,
+        redemptionFrequency: source.redemptionFrequency,
+        discussion: source.discussion,
+        terms: source.terms,
+        merchantId: source.merchantId,
+        areaId: source.areaId,
+        categoryId: source.categoryId,
+        isWhitelisted: source.isWhitelisted,
+        shareSlug: randomUUID(),
+        status: 'ARCHIVED',
+        audience: source.audience,
+        startsAt: source.startsAt,
+        expiresAt: source.expiresAt,
+      },
+      include: { merchant: true, area: true, category: true },
+    });
+    await this.syncBirthdayGift(duplicate.id);
+    return duplicate;
+  }
+
+  async importCsv(csv: string) {
+    if (!csv?.trim()) throw new BadRequestException('CSV content is required');
+    const records = csvRecords(csv);
+    const imported: string[] = [];
+    const errors: Array<{ row: number; message: string }> = [];
+
+    for (const [index, record] of records.entries()) {
+      const row = index + 2;
+      try {
+        if (!record.title || !record.description || !record.business || !record.area) {
+          throw new Error('title, description, business and area are required');
+        }
+        const merchant = await this.prisma.merchant.findFirst({ where: { name: record.business, isDeleted: false } });
+        if (!merchant) throw new Error(`Business not found: ${record.business}`);
+        const area = await this.prisma.area.findFirst({ where: { slug: record.area, isDeleted: false } });
+        if (!area) throw new Error(`Area not found: ${record.area}`);
+        const category = record.category ? await this.prisma.category.findFirst({ where: { slug: record.category, isDeleted: false } }) : null;
+        if (record.category && !category) throw new Error(`Category not found: ${record.category}`);
+        const status = record.status || 'ACTIVE';
+        if (!['ACTIVE', 'ARCHIVED', 'EXPIRED', 'SUSPENDED'].includes(status)) throw new Error(`Invalid status: ${status}`);
+        const existing = await this.prisma.coupon.findFirst({ where: { title: record.title, merchantId: merchant.id, isDeleted: false } });
+        if (existing) throw new Error('Duplicate coupon title for this business');
+
+        const coupon = await this.prisma.coupon.create({
+          data: {
+            title: record.title,
+            description: record.description,
+            merchantId: merchant.id,
+            areaId: area.id,
+            categoryId: category?.id,
+            couponCode: record.couponCode || undefined,
+            couponLink: record.couponLink || undefined,
+            imageUrl: record.imageUrl || undefined,
+            terms: record.terms || undefined,
+            discussion: record.discussion || undefined,
+            redemptionLimit: record.redemptionLimit ? Number(record.redemptionLimit) : undefined,
+            startsAt: record.startsAt ? new Date(record.startsAt) : undefined,
+            expiresAt: record.expiresAt ? new Date(record.expiresAt) : undefined,
+            status: status as any,
+            audience: (record.audience || 'ALL_USERS') as any,
+            shareSlug: randomUUID(),
+          },
+        });
+        await this.syncBirthdayGift(coupon.id);
+        imported.push(coupon.id);
+      } catch (error) {
+        errors.push({ row, message: error instanceof Error ? error.message : 'Invalid row' });
+      }
+    }
+
+    return { imported: imported.length, failed: errors.length, ids: imported, errors };
   }
 
   async find(user: { id?: string; role?: string; areaId?: string | null } | null, filter: FilterCouponDto) {
@@ -105,6 +325,22 @@ export class CouponsService {
       ];
     }
 
+    let userRecord: { latitude: any; longitude: any; dateOfBirth: Date | null; status: string } | null = null;
+    if (user?.id) {
+      userRecord = await this.prisma.user.findUnique({
+        where: { id: user.id },
+        select: { latitude: true, longitude: true, dateOfBirth: true, status: true },
+      });
+    }
+    if (user?.role !== 'ADMIN' && user?.role !== 'STAFF') {
+      const dob = userRecord?.dateOfBirth ? new Date(userRecord.dateOfBirth) : null;
+      const now = new Date();
+      const isBirthday = !!dob && dob.getUTCMonth() === now.getUTCMonth() && dob.getUTCDate() === now.getUTCDate();
+      whereClause.audience = isBirthday
+        ? { in: ['ALL_USERS', 'BIRTHDAY_USERS_ONLY', 'ALL_USERS_AND_BIRTHDAY_GIFT'] }
+        : { in: ['ALL_USERS', 'ALL_USERS_AND_BIRTHDAY_GIFT'] };
+    }
+
     let coupons = await this.prisma.coupon.findMany({
       where: whereClause,
       include: {
@@ -149,14 +385,6 @@ export class CouponsService {
     }
 
     // Add distance and sort if user location is known
-    let userRecord = null;
-    if (user?.id) {
-      userRecord = await this.prisma.user.findUnique({
-        where: { id: user.id },
-        select: { latitude: true, longitude: true },
-      });
-    }
-
     if (userRecord?.latitude && userRecord?.longitude) {
       const userLat = Number(userRecord.latitude);
       const userLon = Number(userRecord.longitude);
@@ -211,6 +439,9 @@ export class CouponsService {
       include: { merchant: true, area: true, category: true },
     });
     if (!coupon || coupon.isDeleted || coupon.status !== 'ACTIVE') {
+      throw new NotFoundException('Coupon not found');
+    }
+    if (coupon.audience === 'BIRTHDAY_USERS_ONLY') {
       throw new NotFoundException('Coupon not found');
     }
     return coupon;
@@ -301,6 +532,9 @@ export class CouponsService {
       startsAt: startsAt ? new Date(startsAt) : undefined,
       expiresAt: expiresAt ? new Date(expiresAt) : undefined,
     };
+    if (data.couponCode !== undefined) {
+      updateData.couponCode = data.couponCode ? data.couponCode.trim().toUpperCase() : null;
+    }
     if (merchantId) {
       const merchant = await this.prisma.merchant.findUnique({ where: { id: merchantId } });
       if (!merchant) throw new NotFoundException('Merchant not found');
@@ -309,10 +543,12 @@ export class CouponsService {
     }
     if (categoryId !== undefined) updateData.categoryId = categoryId;
 
-    return this.prisma.coupon.update({
+    const coupon = await this.prisma.coupon.update({
       where: { id },
       data: updateData,
     });
+    await this.syncBirthdayGift(coupon.id);
+    return coupon;
   }
 
   async findById(id: string, userId?: string) {
@@ -336,21 +572,56 @@ export class CouponsService {
       throw new NotFoundException('Coupon not found');
     }
 
+    if (coupon.audience === 'BIRTHDAY_USERS_ONLY') {
+      if (!userId) throw new NotFoundException('Coupon not found');
+      const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { dateOfBirth: true, status: true } });
+      const dob = user?.dateOfBirth ? new Date(user.dateOfBirth) : null;
+      const now = new Date();
+      if (!user || user.status !== 'ACTIVE' || !dob || dob.getUTCMonth() !== now.getUTCMonth() || dob.getUTCDate() !== now.getUTCDate()) {
+        throw new NotFoundException('Coupon not found');
+      }
+    }
+
     let isSaved = false;
     let isRedeemed = false;
+    let redeemedAt: Date | null = null;
+    let redemptionAvailableAt: Date | null = null;
     if (userId) {
       const [saved, redeemed] = await Promise.all([
         this.prisma.savedCoupon.findFirst({ where: { userId, couponId: id } }),
-        this.prisma.couponRedemption.findFirst({ where: { userId, couponId: id } }),
+        this.prisma.couponRedemption.findFirst({ where: { userId, couponId: id }, orderBy: { createdAt: 'desc' } }),
       ]);
       isSaved = !!saved;
-      isRedeemed = !!redeemed;
+      redeemedAt = redeemed?.createdAt ?? null;
+
+      if (redeemed) {
+        if (coupon.redemptionFrequency === 'ONE_TIME') {
+          isRedeemed = true;
+          redemptionAvailableAt = null;
+        } else if (coupon.redemptionFrequency === 'UNLIMITED') {
+          isRedeemed = false;
+          redemptionAvailableAt = null;
+        } else {
+          const nextAt = nextRedemptionAt(coupon.redemptionFrequency, redeemed.createdAt);
+          if (nextAt && new Date() < nextAt) {
+            // Still in cooldown period
+            isRedeemed = true;
+            redemptionAvailableAt = nextAt;
+          } else {
+            // Cooldown has expired! User can redeem again
+            isRedeemed = false;
+            redemptionAvailableAt = null;
+          }
+        }
+      }
     }
 
     return {
       ...coupon,
       isSaved,
       isRedeemed,
+      redeemedAt,
+      redemptionAvailableAt,
     };
   }
 
@@ -373,7 +644,7 @@ export class CouponsService {
     return { couponId, views };
   }
 
-  async redeemCoupon(userId: string, couponId: string) {
+  async redeemCoupon(userId: string, couponId: string, enteredCouponCode: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { status: true } });
     if (!user) throw new NotFoundException('User not found');
     if (user.status === 'BANNED') throw new ForbiddenException('This user is banned');
@@ -386,43 +657,38 @@ export class CouponsService {
     if (!coupon) throw new NotFoundException('Coupon not found');
     if (coupon.status !== 'ACTIVE') throw new BadRequestException('Coupon is not active');
 
+    const expectedCode = coupon.couponCode?.trim().toUpperCase();
+    const receivedCode = enteredCouponCode?.trim().toUpperCase();
+    if (!expectedCode || !receivedCode || expectedCode !== receivedCode) {
+      throw new ForbiddenException('Invalid coupon code. Please check the coupon code and try again.');
+    }
+
+    if (coupon.audience === 'BIRTHDAY_USERS_ONLY') {
+      const birthdayUser = await this.prisma.user.findUnique({ where: { id: userId }, select: { dateOfBirth: true } });
+      const dob = birthdayUser?.dateOfBirth ? new Date(birthdayUser.dateOfBirth) : null;
+      const today = new Date();
+      if (!dob || dob.getUTCMonth() !== today.getUTCMonth() || dob.getUTCDate() !== today.getUTCDate()) {
+        throw new ForbiddenException('This coupon is only available on your birthday');
+      }
+    }
+
     // Check expiration if any
     if (coupon.expiresAt && new Date() > new Date(coupon.expiresAt)) {
       throw new BadRequestException('This coupon has expired');
     }
 
-    // Check redemption frequency / limits
-    if (coupon.redemptionFrequency === 'ONE_TIME') {
-      const existing = await this.prisma.couponRedemption.findFirst({
-        where: { userId, couponId },
-      });
-      if (existing) {
+    const now = new Date();
+    const latestRedemption = await this.prisma.couponRedemption.findFirst({
+      where: { userId, couponId },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (latestRedemption) {
+      if (coupon.redemptionFrequency === 'ONE_TIME') {
         throw new ConflictException('You have already redeemed this coupon');
       }
-    } else if (coupon.redemptionFrequency === 'DAILY') {
-      const startOfDay = new Date();
-      startOfDay.setHours(0, 0, 0, 0);
-      const existingToday = await this.prisma.couponRedemption.findFirst({
-        where: {
-          userId,
-          couponId,
-          createdAt: { gte: startOfDay },
-        },
-      });
-      if (existingToday) {
-        throw new ConflictException('You can only redeem this coupon once per day');
-      }
-    } else if (coupon.redemptionFrequency === 'WEEKLY') {
-      const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-      const existingWeek = await this.prisma.couponRedemption.findFirst({
-        where: {
-          userId,
-          couponId,
-          createdAt: { gte: oneWeekAgo },
-        },
-      });
-      if (existingWeek) {
-        throw new ConflictException('You can only redeem this coupon once per week');
+      const availableAt = nextRedemptionAt(coupon.redemptionFrequency, latestRedemption.createdAt);
+      if (availableAt && now < availableAt) {
+        throw new ConflictException(`You can redeem this coupon again after ${availableAt.toISOString()}`);
       }
     }
 
@@ -445,11 +711,14 @@ export class CouponsService {
       },
     });
 
+    const redemptionAvailableAt = nextRedemptionAt(coupon.redemptionFrequency, redemption.createdAt);
+
     return {
       success: true,
       message: 'Coupon redeemed successfully',
       redemptionId: redemption.id,
       redeemedAt: redemption.createdAt,
+      redemptionAvailableAt,
       couponCode: coupon.couponCode,
       couponTitle: coupon.title,
       merchantName: coupon.merchant?.name,
@@ -467,6 +736,7 @@ export class CouponsService {
       where: { id },
       data: { isDeleted: true, status: 'ARCHIVED' },
     });
+    await this.syncBirthdayGift(id);
 
     return { id, deleted: true, softDeleted: true, isDeleted: true, status: 'ARCHIVED' };
   }

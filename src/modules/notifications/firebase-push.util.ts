@@ -44,6 +44,59 @@ function stringifyData(data?: Record<string, unknown>) {
   );
 }
 
+export function isApnsToken(token?: string | null): boolean {
+  if (!token) return false;
+  return /^[0-9a-fA-F]{64,}$/.test(token.trim());
+}
+
+export async function convertApnsToFcm(
+  apnsToken: string,
+  isSandbox: boolean = process.env.NODE_ENV !== 'production' || process.env.APNS_SANDBOX === 'true',
+): Promise<string | null> {
+  const serviceAccount = getServiceAccount();
+  if (!serviceAccount) return null;
+
+  try {
+    const cred = cert(serviceAccount);
+    const tokenObj = await cred.getAccessToken();
+    const accessToken = tokenObj?.access_token;
+    if (!accessToken) return null;
+
+    const res = await fetch('https://iid.googleapis.com/iid/v1:batchImport', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+        access_token_auth: 'true',
+      },
+      body: JSON.stringify({
+        application: process.env.APPLE_CLIENT_ID || 'ai.citydeals.app',
+        sandbox: isSandbox,
+        apns_tokens: [apnsToken.trim()],
+      }),
+    });
+
+    if (!res.ok) {
+      const errBody = await res.text();
+      console.warn(`[FCM] batchImport HTTP ${res.status} (sandbox=${isSandbox}): ${errBody}`);
+      return null;
+    }
+
+    const data = (await res.json()) as any;
+    const result = data?.results?.[0];
+    if (result?.status === 'OK' && result?.registration_token) {
+      console.log(`[FCM] Successfully converted APNs token to FCM (sandbox=${isSandbox}):`, result.registration_token.slice(0, 20) + '...');
+      return result.registration_token;
+    }
+
+    console.warn(`[FCM] batchImport result status: ${result?.status} (sandbox=${isSandbox})`, JSON.stringify(data));
+    return null;
+  } catch (err) {
+    console.warn('[FCM] APNs to FCM conversion error:', err);
+    return null;
+  }
+}
+
 export async function sendFirebasePushMessages(messages: FirebasePushMessage[]) {
   const messaging = getFirebaseMessaging();
   const validMessages = messages.filter((message) => message.token);
@@ -57,9 +110,24 @@ export async function sendFirebasePushMessages(messages: FirebasePushMessage[]) 
     };
   }
 
+  // Pre-process messages: convert native iOS APNs tokens to FCM registration tokens
+  const isDev = process.env.NODE_ENV !== 'production' || process.env.APNS_SANDBOX === 'true';
+  const resolvedMessages = await Promise.all(
+    validMessages.map(async (message) => {
+      const trimmed = message.token.trim();
+      if (isApnsToken(trimmed)) {
+        const converted = await convertApnsToFcm(trimmed, isDev);
+        if (converted) {
+          return { ...message, token: converted, originalApnsToken: trimmed, triedSandbox: isDev };
+        }
+      }
+      return { ...message, token: trimmed };
+    }),
+  );
+
   const responses = await Promise.allSettled(
-    validMessages.map((message) =>
-      messaging.send({
+    resolvedMessages.map(async (message: any) => {
+      const payload = {
         token: message.token,
         notification: {
           title: message.title,
@@ -67,7 +135,7 @@ export async function sendFirebasePushMessages(messages: FirebasePushMessage[]) 
         },
         data: stringifyData(message.data),
         android: {
-          priority: 'high',
+          priority: 'high' as const,
           notification: {
             channelId: 'deals',
             color: '#ea580c',
@@ -75,14 +143,39 @@ export async function sendFirebasePushMessages(messages: FirebasePushMessage[]) 
           },
         },
         apns: {
+          headers: {
+            'apns-priority': '10',
+            'apns-push-type': 'alert',
+          },
           payload: {
             aps: {
+              alert: {
+                title: message.title,
+                body: message.body,
+              },
               sound: 'default',
+              badge: 0,
             },
           },
         },
-      }),
-    ),
+      };
+
+      try {
+        return await messaging.send(payload);
+      } catch (err: any) {
+        const errMsg = err?.message || String(err);
+        // If sending failed because APNs environment was mismatched, retry once with alternate sandbox setting
+        if (message.originalApnsToken && message.triedSandbox !== undefined && errMsg.includes('APNs device token is invalid')) {
+          const alternateSandbox = !message.triedSandbox;
+          console.log(`[FCM] Retrying APNs send with alternate sandbox=${alternateSandbox}...`);
+          const retryToken = await convertApnsToFcm(message.originalApnsToken, alternateSandbox);
+          if (retryToken && retryToken !== message.token) {
+            return await messaging.send({ ...payload, token: retryToken });
+          }
+        }
+        throw err;
+      }
+    }),
   );
 
   const sent = responses.filter((response) => response.status === 'fulfilled').length;
