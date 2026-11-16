@@ -424,12 +424,24 @@ export class AuthService {
 
   async syncLocation(userId: string, dto: SyncLocationDto) {
     const area = await this.areasService.resolveArea(dto.latitude, dto.longitude);
+    let tokenToSave = dto.fcmToken?.trim();
+    if (tokenToSave && isApnsToken(tokenToSave)) {
+      try {
+        const converted = await convertApnsToFcm(tokenToSave);
+        if (converted) {
+          tokenToSave = converted;
+        }
+      } catch (err) {
+        this.logger.warn(`Failed to convert APNs token in syncLocation for user ${userId}: ${err}`);
+      }
+    }
+
     const updatedUser = await this.prisma.user.update({
       where: { id: userId },
       data: {
         latitude: dto.latitude,
         longitude: dto.longitude,
-        fcmToken: dto.fcmToken,
+        ...(tokenToSave ? { fcmToken: tokenToSave } : {}),
         areaId: area?.id,
       },
       select: {

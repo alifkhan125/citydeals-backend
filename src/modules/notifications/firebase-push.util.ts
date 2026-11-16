@@ -74,6 +74,8 @@ export async function convertApnsToFcm(apnsToken: string, isSandbox = false): Pr
     });
 
     if (!res.ok) {
+      const errBody = await res.text();
+      console.warn(`[FCM] batchImport HTTP ${res.status} (sandbox=${isSandbox}): ${errBody}`);
       if (!isSandbox) {
         return convertApnsToFcm(apnsToken, true);
       }
@@ -83,9 +85,11 @@ export async function convertApnsToFcm(apnsToken: string, isSandbox = false): Pr
     const data = (await res.json()) as any;
     const result = data?.results?.[0];
     if (result?.status === 'OK' && result?.registration_token) {
+      console.log(`[FCM] Successfully converted APNs token to FCM (sandbox=${isSandbox}):`, result.registration_token.slice(0, 20) + '...');
       return result.registration_token;
     }
 
+    console.warn(`[FCM] batchImport result status: ${result?.status} (sandbox=${isSandbox})`, JSON.stringify(data));
     if (!isSandbox) {
       return convertApnsToFcm(apnsToken, true);
     }
@@ -150,7 +154,7 @@ export async function sendFirebasePushMessages(messages: FirebasePushMessage[]) 
                 body: message.body,
               },
               sound: 'default',
-              badge: 1,
+              badge: 0,
             },
           },
         },
