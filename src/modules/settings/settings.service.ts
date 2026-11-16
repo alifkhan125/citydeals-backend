@@ -30,7 +30,7 @@ export class SettingsService {
       playStoreUrl:
         values[PLAY_STORE_KEY] ||
         this.config.get<string>('app.playStoreUrl') ||
-        'https://play.google.com/store/apps/details?id=com.citydeals.app',
+        'https://play.google.com/store/apps/details?id=ai.citydeals.app',
       appStoreUrl:
         values[APP_STORE_KEY] ||
         this.config.get<string>('app.appStoreUrl') ||
