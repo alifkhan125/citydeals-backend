@@ -46,10 +46,13 @@ function stringifyData(data?: Record<string, unknown>) {
 
 export function isApnsToken(token?: string | null): boolean {
   if (!token) return false;
-  return /^[0-9a-fA-F]{64,128}$/.test(token.trim());
+  return /^[0-9a-fA-F]{64,}$/.test(token.trim());
 }
 
-export async function convertApnsToFcm(apnsToken: string, isSandbox = false): Promise<string | null> {
+export async function convertApnsToFcm(
+  apnsToken: string,
+  isSandbox: boolean = process.env.NODE_ENV !== 'production' || process.env.APNS_SANDBOX === 'true',
+): Promise<string | null> {
   const serviceAccount = getServiceAccount();
   if (!serviceAccount) return null;
 
@@ -76,9 +79,6 @@ export async function convertApnsToFcm(apnsToken: string, isSandbox = false): Pr
     if (!res.ok) {
       const errBody = await res.text();
       console.warn(`[FCM] batchImport HTTP ${res.status} (sandbox=${isSandbox}): ${errBody}`);
-      if (!isSandbox) {
-        return convertApnsToFcm(apnsToken, true);
-      }
       return null;
     }
 
@@ -90,9 +90,6 @@ export async function convertApnsToFcm(apnsToken: string, isSandbox = false): Pr
     }
 
     console.warn(`[FCM] batchImport result status: ${result?.status} (sandbox=${isSandbox})`, JSON.stringify(data));
-    if (!isSandbox) {
-      return convertApnsToFcm(apnsToken, true);
-    }
     return null;
   } catch (err) {
     console.warn('[FCM] APNs to FCM conversion error:', err);
@@ -114,20 +111,23 @@ export async function sendFirebasePushMessages(messages: FirebasePushMessage[]) 
   }
 
   // Pre-process messages: convert native iOS APNs tokens to FCM registration tokens
+  const isDev = process.env.NODE_ENV !== 'production' || process.env.APNS_SANDBOX === 'true';
   const resolvedMessages = await Promise.all(
     validMessages.map(async (message) => {
-      let token = message.token.trim();
-      if (isApnsToken(token)) {
-        const converted = await convertApnsToFcm(token);
-        if (converted) token = converted;
+      const trimmed = message.token.trim();
+      if (isApnsToken(trimmed)) {
+        const converted = await convertApnsToFcm(trimmed, isDev);
+        if (converted) {
+          return { ...message, token: converted, originalApnsToken: trimmed, triedSandbox: isDev };
+        }
       }
-      return { ...message, token };
+      return { ...message, token: trimmed };
     }),
   );
 
   const responses = await Promise.allSettled(
-    resolvedMessages.map((message) =>
-      messaging.send({
+    resolvedMessages.map(async (message: any) => {
+      const payload = {
         token: message.token,
         notification: {
           title: message.title,
@@ -135,7 +135,7 @@ export async function sendFirebasePushMessages(messages: FirebasePushMessage[]) 
         },
         data: stringifyData(message.data),
         android: {
-          priority: 'high',
+          priority: 'high' as const,
           notification: {
             channelId: 'deals',
             color: '#ea580c',
@@ -158,8 +158,24 @@ export async function sendFirebasePushMessages(messages: FirebasePushMessage[]) 
             },
           },
         },
-      }),
-    ),
+      };
+
+      try {
+        return await messaging.send(payload);
+      } catch (err: any) {
+        const errMsg = err?.message || String(err);
+        // If sending failed because APNs environment was mismatched, retry once with alternate sandbox setting
+        if (message.originalApnsToken && message.triedSandbox !== undefined && errMsg.includes('APNs device token is invalid')) {
+          const alternateSandbox = !message.triedSandbox;
+          console.log(`[FCM] Retrying APNs send with alternate sandbox=${alternateSandbox}...`);
+          const retryToken = await convertApnsToFcm(message.originalApnsToken, alternateSandbox);
+          if (retryToken && retryToken !== message.token) {
+            return await messaging.send({ ...payload, token: retryToken });
+          }
+        }
+        throw err;
+      }
+    }),
   );
 
   const sent = responses.filter((response) => response.status === 'fulfilled').length;

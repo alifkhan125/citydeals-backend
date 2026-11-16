@@ -78,7 +78,7 @@ export class AuthController {
   @ApiBearerAuth('access-token')
   @Post('push-token/sync')
   syncPushToken(@GetUser() user: { id: string }, @Body() dto: SyncPushTokenDto) {
-    return this.authService.syncPushToken(user.id, dto.fcmToken);
+    return this.authService.syncPushToken(user.id, dto.fcmToken, dto.isSandbox);
   }
 
   @UseGuards(JwtAuthGuard)

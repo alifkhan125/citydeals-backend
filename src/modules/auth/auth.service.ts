@@ -508,12 +508,17 @@ export class AuthService {
     return updatedUser;
   }
 
-  async syncPushToken(userId: string, fcmToken: string) {
+  async syncPushToken(userId: string, fcmToken: string, isSandbox?: boolean) {
     let tokenToSave = fcmToken?.trim();
     if (tokenToSave && isApnsToken(tokenToSave)) {
       try {
-        const converted = await convertApnsToFcm(tokenToSave);
+        const useSandbox = isSandbox ?? (process.env.NODE_ENV !== 'production' || process.env.APNS_SANDBOX === 'true');
+        let converted = await convertApnsToFcm(tokenToSave, useSandbox);
+        if (!converted) {
+          converted = await convertApnsToFcm(tokenToSave, !useSandbox);
+        }
         if (converted) {
+          this.logger.log(`[Push] User ${userId} APNs token successfully converted to FCM token (sandbox=${useSandbox})`);
           tokenToSave = converted;
         }
       } catch (err) {
