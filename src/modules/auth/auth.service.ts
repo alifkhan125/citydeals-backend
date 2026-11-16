@@ -184,13 +184,16 @@ export class AuthService {
   async googleLogin(dto: GoogleLoginDto) {
     const client = new OAuth2Client(this.configService.get('GOOGLE_CLIENT_ID'));
     try {
+      const splitIds = (val?: string) => (val || '').split(',').map((s) => s.trim()).filter(Boolean);
+      const audience = [
+        ...splitIds(this.configService.get('GOOGLE_WEB_CLIENT_ID')),
+        ...splitIds(this.configService.get('GOOGLE_ANDROID_CLIENT_ID')),
+        ...splitIds(this.configService.get('GOOGLE_IOS_CLIENT_ID')),
+      ];
+
       const ticket = await client.verifyIdToken({
         idToken: dto.idToken,
-        audience: [
-          this.configService.get('GOOGLE_WEB_CLIENT_ID') || '',
-          this.configService.get('GOOGLE_ANDROID_CLIENT_ID') || '',
-          this.configService.get('GOOGLE_IOS_CLIENT_ID') || '',
-        ].filter(Boolean),
+        audience,
       });
       const payload = ticket.getPayload();
       
@@ -253,7 +256,7 @@ export class AuthService {
 
   async appleLogin(dto: AppleLoginDto) {
     try {
-      const audience = this.configService.get<string>('APPLE_CLIENT_ID') || 'com.citydeals.app';
+      const audience = this.configService.get<string>('APPLE_CLIENT_ID') || 'ai.citydeals.app';
       const { payload } = await jwtVerify(dto.identityToken, APPLE_JWKS, {
         issuer: 'https://appleid.apple.com',
         audience,
