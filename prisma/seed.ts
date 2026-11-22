@@ -41,6 +41,33 @@ async function main() {
     },
   });
 
+  // Seed Anthony Admin user
+  const anthonyEmail = process.env.SEED_ANTHONY_EMAIL || 'anthony@citydeals.ai';
+  const anthonyPassword = process.env.SEED_ANTHONY_PASSWORD || '12345678';
+  const anthonyPasswordHash = await bcrypt.hash(anthonyPassword, 12);
+
+  console.log(`Seeding admin user (${anthonyEmail})...`);
+
+  const anthonyAdmin = await prisma.user.upsert({
+    where: { email: anthonyEmail },
+    update: {
+      role: 'ADMIN',
+      status: 'ACTIVE',
+      passwordHash: anthonyPasswordHash,
+      onboardingCompleted: true,
+      acceptedTerms: true,
+    },
+    create: {
+      fullName: 'Anthony',
+      email: anthonyEmail,
+      passwordHash: anthonyPasswordHash,
+      role: 'ADMIN',
+      status: 'ACTIVE',
+      acceptedTerms: true,
+      onboardingCompleted: true,
+    },
+  });
+
   // Seed Reviewer / Test User (Normal USER role)
   const reviewerEmail = process.env.SEED_REVIEWER_EMAIL || 'reviewer@citydeals.com';
   const reviewerPassword = process.env.SEED_REVIEWER_PASSWORD || 'CityDeals@1234';
@@ -71,6 +98,7 @@ async function main() {
   console.log('Seed completed successfully!');
   console.log('--------------------------------------------------');
   console.log(`Admin User:    ${admin.email} / ${adminPassword} (ADMIN)`);
+  console.log(`Admin User:    ${anthonyAdmin.email} / ${anthonyPassword} (ADMIN)`);
   console.log(`Reviewer User: ${reviewer.email} / ${reviewerPassword} (USER)`);
   console.log('--------------------------------------------------');
 }
