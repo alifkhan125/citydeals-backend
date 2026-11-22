@@ -12,7 +12,35 @@ export class ShareService {
   async getCouponOpenPage(shareSlug: string) {
     const coupon = await this.prisma.coupon.findUnique({
       where: { shareSlug },
-      select: { title: true, description: true, imageUrl: true, status: true, isDeleted: true },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        imageUrl: true,
+        status: true,
+        isDeleted: true,
+        terms: true,
+        discussion: true,
+        expiresAt: true,
+        merchant: {
+          select: {
+            name: true,
+            logoUrl: true,
+            address: true,
+          },
+        },
+        area: {
+          select: {
+            name: true,
+            city: true,
+          },
+        },
+        category: {
+          select: {
+            name: true,
+          },
+        },
+      },
     });
     if (!coupon || coupon.isDeleted || coupon.status !== 'ACTIVE') {
       throw new NotFoundException('Coupon not found');

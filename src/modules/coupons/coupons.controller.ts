@@ -51,6 +51,24 @@ export class CouponsController {
   @ApiBearerAuth('access-token')
   @Roles('ADMIN')
   @RequirePermission('create-edit-coupons')
+  @Get('admin/order')
+  getCouponOrder() {
+    return this.couponsService.getCouponOrder();
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, StaffPermissionGuard)
+  @ApiBearerAuth('access-token')
+  @Roles('ADMIN')
+  @RequirePermission('create-edit-coupons')
+  @Post('admin/order')
+  updateCouponOrder(@Body() body: { couponIds: string[] }) {
+    return this.couponsService.updateCouponOrder(body.couponIds || []);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, StaffPermissionGuard)
+  @ApiBearerAuth('access-token')
+  @Roles('ADMIN')
+  @RequirePermission('create-edit-coupons')
   @Post('admin/import')
   importCsv(@BodyType('csv') csv: string) {
     return this.couponsService.importCsv(csv);

@@ -407,6 +407,27 @@ export class CouponsService implements OnModuleInit {
       });
     }
 
+    // Apply manual ordering configured by Admin
+    try {
+      const orderSetting = await this.prisma.appSetting.findUnique({ where: { key: 'coupon_order' } });
+      if (orderSetting?.value) {
+        const orderIds: string[] = JSON.parse(orderSetting.value);
+        if (Array.isArray(orderIds) && orderIds.length > 0) {
+          const orderMap = new Map<string, number>();
+          orderIds.forEach((id, index) => orderMap.set(id, index));
+          coupons.sort((a: any, b: any) => {
+            const hasA = orderMap.has(a.id);
+            const hasB = orderMap.has(b.id);
+            if (hasA && hasB) return orderMap.get(a.id)! - orderMap.get(b.id)!;
+            if (hasA) return -1;
+            if (hasB) return 1;
+            if (b.isWhitelisted !== a.isWhitelisted) return (b.isWhitelisted ? 1 : 0) - (a.isWhitelisted ? 1 : 0);
+            return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+          });
+        }
+      }
+    } catch {}
+
     if (user?.id) {
       const savedCoupons = await this.prisma.savedCoupon.findMany({
         where: { userId: user.id },
@@ -814,5 +835,26 @@ export class CouponsService implements OnModuleInit {
     if (expoMessages.length > 0) await sendExpoPushMessages(expoMessages);
 
     return { sent: nearbyUsers.length, message: `Notification sent to ${nearbyUsers.length} user(s) within 3km` };
+  }
+
+  async getCouponOrder() {
+    try {
+      const setting = await this.prisma.appSetting.findUnique({ where: { key: 'coupon_order' } });
+      if (!setting?.value) return [];
+      const parsed = JSON.parse(setting.value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+
+  async updateCouponOrder(couponIds: string[]) {
+    const value = JSON.stringify(couponIds || []);
+    await this.prisma.appSetting.upsert({
+      where: { key: 'coupon_order' },
+      update: { value },
+      create: { key: 'coupon_order', value },
+    });
+    return { success: true, count: couponIds.length };
   }
 }
