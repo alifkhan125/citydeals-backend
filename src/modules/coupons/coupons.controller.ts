@@ -110,8 +110,8 @@ export class CouponsController {
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('access-token')
   @Post(':id/redeem')
-  redeemCoupon(@GetUser() user: { id: string }, @Param('id') id: string, @Body() dto: RedeemCouponDto) {
-    return this.couponsService.redeemCoupon(user.id, id, dto.couponCode);
+  redeemCoupon(@GetUser() user: { id: string }, @Param('id') id: string, @Body() dto?: RedeemCouponDto) {
+    return this.couponsService.redeemCoupon(user.id, id, dto?.couponCode);
   }
 
   @UseGuards(OptionalJwtAuthGuard)

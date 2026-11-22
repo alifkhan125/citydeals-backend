@@ -644,7 +644,7 @@ export class CouponsService implements OnModuleInit {
     return { couponId, views };
   }
 
-  async redeemCoupon(userId: string, couponId: string, enteredCouponCode: string) {
+  async redeemCoupon(userId: string, couponId: string, enteredCouponCode?: string) {
     const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { status: true } });
     if (!user) throw new NotFoundException('User not found');
     if (user.status === 'BANNED') throw new ForbiddenException('This user is banned');
@@ -659,7 +659,7 @@ export class CouponsService implements OnModuleInit {
 
     const expectedCode = coupon.couponCode?.trim().toUpperCase();
     const receivedCode = enteredCouponCode?.trim().toUpperCase();
-    if (!expectedCode || !receivedCode || expectedCode !== receivedCode) {
+    if (expectedCode && receivedCode && expectedCode !== receivedCode) {
       throw new ForbiddenException('Invalid coupon code. Please check the coupon code and try again.');
     }
 
