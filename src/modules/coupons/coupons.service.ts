@@ -549,7 +549,7 @@ export class CouponsService implements OnModuleInit {
   }
 
   async togglePin(id: string, isPinned?: boolean) {
-    const coupon = await this.prisma.coupon.findUnique({ where: { id } });
+    const coupon: any = await this.prisma.coupon.findUnique({ where: { id } });
     if (!coupon || coupon.isDeleted) throw new NotFoundException('Coupon not found');
 
     const nextPinState = isPinned !== undefined ? isPinned : !coupon.isPinned;
@@ -558,7 +558,7 @@ export class CouponsService implements OnModuleInit {
       data: {
         isPinned: nextPinState,
         pinnedAt: nextPinState ? new Date() : null,
-      },
+      } as any,
       include: {
         merchant: true,
         area: true,
@@ -576,9 +576,9 @@ export class CouponsService implements OnModuleInit {
       startsAt: startsAt ? new Date(startsAt) : undefined,
       expiresAt: expiresAt ? new Date(expiresAt) : undefined,
     };
-    if (data.isPinned !== undefined) {
-      updateData.isPinned = data.isPinned;
-      updateData.pinnedAt = data.isPinned ? new Date() : null;
+    if ((data as any).isPinned !== undefined) {
+      updateData.isPinned = (data as any).isPinned;
+      updateData.pinnedAt = (data as any).isPinned ? new Date() : null;
     }
     if (data.couponCode !== undefined) {
       updateData.couponCode = data.couponCode ? data.couponCode.trim().toUpperCase() : null;
