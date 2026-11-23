@@ -384,7 +384,7 @@ export class CouponsService implements OnModuleInit {
       coupons = [...coupons, ...extraCoupons];
     }
 
-    // Add distance and sort if user location is known
+    // Calculate distance if user coordinates are available
     if (userRecord?.latitude && userRecord?.longitude) {
       const userLat = Number(userRecord.latitude);
       const userLon = Number(userRecord.longitude);
@@ -398,35 +398,37 @@ export class CouponsService implements OnModuleInit {
         
         return { ...c, distanceMeters };
       });
-
-      // Sort: Whitelisted first, then nearest first
-      coupons.sort((a: any, b: any) => {
-        if (a.isWhitelisted && !b.isWhitelisted) return -1;
-        if (!a.isWhitelisted && b.isWhitelisted) return 1;
-        return a.distanceMeters - b.distanceMeters;
-      });
     }
 
-    // Apply manual ordering configured by Admin
-    try {
-      const orderSetting = await this.prisma.appSetting.findUnique({ where: { key: 'coupon_order' } });
-      if (orderSetting?.value) {
-        const orderIds: string[] = JSON.parse(orderSetting.value);
-        if (Array.isArray(orderIds) && orderIds.length > 0) {
-          const orderMap = new Map<string, number>();
-          orderIds.forEach((id, index) => orderMap.set(id, index));
-          coupons.sort((a: any, b: any) => {
-            const hasA = orderMap.has(a.id);
-            const hasB = orderMap.has(b.id);
-            if (hasA && hasB) return orderMap.get(a.id)! - orderMap.get(b.id)!;
-            if (hasA) return -1;
-            if (hasB) return 1;
-            if (b.isWhitelisted !== a.isWhitelisted) return (b.isWhitelisted ? 1 : 0) - (a.isWhitelisted ? 1 : 0);
-            return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-          });
-        }
+    // Apply strict sorting:
+    // 1. Manually Pinned posts ALWAYS appear first (newest pin first)
+    // 2. Regular posts strictly follow existing location-based priority: Whitelisted first, then Nearest distance, then Recency
+    coupons.sort((a: any, b: any) => {
+      // Pinned posts first
+      if (a.isPinned && !b.isPinned) return -1;
+      if (!a.isPinned && b.isPinned) return 1;
+
+      // Both pinned: order by pinnedAt (or createdAt) desc
+      if (a.isPinned && b.isPinned) {
+        const timeA = new Date(a.pinnedAt || a.createdAt).getTime();
+        const timeB = new Date(b.pinnedAt || b.createdAt).getTime();
+        return timeB - timeA;
       }
-    } catch {}
+
+      // Regular posts: Whitelisted first
+      if (a.isWhitelisted && !b.isWhitelisted) return -1;
+      if (!a.isWhitelisted && b.isWhitelisted) return 1;
+
+      // Regular posts: Nearest distance first if distance is known
+      const distA = a.distanceMeters ?? Infinity;
+      const distB = b.distanceMeters ?? Infinity;
+      if (distA !== distB && distA !== Infinity && distB !== Infinity) {
+        return distA - distB;
+      }
+
+      // Chronological fallback
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
 
     if (user?.id) {
       const savedCoupons = await this.prisma.savedCoupon.findMany({
@@ -546,6 +548,27 @@ export class CouponsService implements OnModuleInit {
       }));
   }
 
+  async togglePin(id: string, isPinned?: boolean) {
+    const coupon = await this.prisma.coupon.findUnique({ where: { id } });
+    if (!coupon || coupon.isDeleted) throw new NotFoundException('Coupon not found');
+
+    const nextPinState = isPinned !== undefined ? isPinned : !coupon.isPinned;
+    const updated = await this.prisma.coupon.update({
+      where: { id },
+      data: {
+        isPinned: nextPinState,
+        pinnedAt: nextPinState ? new Date() : null,
+      },
+      include: {
+        merchant: true,
+        area: true,
+        category: true,
+      },
+    });
+
+    return updated;
+  }
+
   async update(id: string, dto: UpdateCouponDto = {}) {
     const { startsAt, expiresAt, merchantId, categoryId, ...data } = dto;
     const updateData: any = {
@@ -553,6 +576,10 @@ export class CouponsService implements OnModuleInit {
       startsAt: startsAt ? new Date(startsAt) : undefined,
       expiresAt: expiresAt ? new Date(expiresAt) : undefined,
     };
+    if (data.isPinned !== undefined) {
+      updateData.isPinned = data.isPinned;
+      updateData.pinnedAt = data.isPinned ? new Date() : null;
+    }
     if (data.couponCode !== undefined) {
       updateData.couponCode = data.couponCode ? data.couponCode.trim().toUpperCase() : null;
     }

@@ -148,6 +148,15 @@ export class CouponsController {
 
   @UseGuards(JwtAuthGuard, RolesGuard, StaffPermissionGuard)
   @ApiBearerAuth('access-token')
+  @Roles('ADMIN')
+  @RequirePermission('create-edit-coupons')
+  @Patch(':id/pin')
+  togglePin(@Param('id') id: string, @Body() body?: { isPinned?: boolean }) {
+    return this.couponsService.togglePin(id, body?.isPinned);
+  }
+
+  @UseGuards(JwtAuthGuard, RolesGuard, StaffPermissionGuard)
+  @ApiBearerAuth('access-token')
   @Roles('ADMIN', 'ADVERTISER')
   @RequirePermission('create-edit-coupons')
   @Patch(':id')

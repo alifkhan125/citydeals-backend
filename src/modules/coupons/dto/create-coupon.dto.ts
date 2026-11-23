@@ -82,6 +82,14 @@ export class CreateCouponDto {
   @IsBoolean()
   isWhitelisted?: boolean;
 
+  @ApiPropertyOptional({
+    example: true,
+    description: 'Pinned posts appear at the top of the mobile feed.',
+  })
+  @IsOptional()
+  @IsBoolean()
+  isPinned?: boolean;
+
   @ApiPropertyOptional({ example: 50 })
   @IsOptional()
   @IsNumber()

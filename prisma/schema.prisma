@@ -194,6 +194,8 @@ model Coupon {
   merchantId          String
   categoryId          String?
   isWhitelisted       Boolean             @default(false)
+  isPinned            Boolean             @default(false)
+  pinnedAt            DateTime?
   createdAt           DateTime            @default(now())
   updatedAt           DateTime            @updatedAt
 
@@ -212,6 +214,7 @@ model Coupon {
   @@index([isDeleted, status, createdAt])
   @@index([merchantId, isDeleted])
   @@index([areaId, isDeleted])
+  @@index([isPinned])
 }
 
 model StaffRole {
