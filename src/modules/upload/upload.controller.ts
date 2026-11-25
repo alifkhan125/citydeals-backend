@@ -60,7 +60,7 @@ export class UploadController {
   })
   @UseInterceptors(
     FileInterceptor('file', {
-      limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+      limits: { fileSize: 3 * 1024 * 1024 }, // 3MB limit
       fileFilter: (_req, file, cb) => {
         if (!file.mimetype.match(/\/(jpg|jpeg|png|webp|gif|svg\+xml)$/)) {
           return cb(
